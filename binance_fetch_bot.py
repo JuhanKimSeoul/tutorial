@@ -15,6 +15,7 @@ import io
 from os import getenv
 from dotenv import load_dotenv
 from aiogram import Bot, types
+from aiohttp import ClientError
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -22,6 +23,8 @@ import asyncio
 from sqlalchemy import DateTime, create_engine, Column, Integer, String, Float, BigInteger, func
 from sqlalchemy.orm import sessionmaker, declarative_base
 from typing import List, Dict, Any
+import traceback
+from aiogram.exceptions import TelegramRetryAfter
 
 '''Database'''
 Base = declarative_base()
@@ -59,6 +62,9 @@ CHAT_ID = getenv('TELEGRAM_CHAT_ID')
 
 assert BOT_ID != None, "Invalid Bot ID"
 assert CHAT_ID != None, "Invalid Chat ID"
+
+# Create a Telegram bot
+bot = Bot(token=BOT_ID)
 
 class CandleType(str, Enum):
     '''Enum to represent candle type'''
@@ -126,7 +132,11 @@ def debugger(log_prefix=""):
             finally:
                 elapsed_time = time.time() - start_time
                 logging.info(f'{log_prefix} Execution Time : {elapsed_time}')
-                logging.debug(f'{log_prefix} ret : {ret}') if ret != None else None
+                if ret is not None:
+                    logging.debug(f'{log_prefix} ret : {ret}')
+                    # if type(ret) == pd.DataFrame:
+                    #     logging.debug(f'{log_prefix} ret : {ret.head()}')
+                    # else:
             return ret
         return wrapper
     return decorator
@@ -275,39 +285,36 @@ async def compare_quote_volume_with_average(tickers: List[Dict[str, Any]], stand
             logger.warning(f"No average quoteVolume found for symbol {symbol}")
             continue
 
-        # Compare the ticker's quoteVolume with the average
-        if quoteVolume >= avg_quote_volume * rate:
+        # Compare the ticker's quoteVolume with the average and quoteVolume is greater than 100,000$
+        if quoteVolume >= avg_quote_volume * rate and quoteVolume > 100_000:
             logger.info(f"symbol : {symbol}, quoteVolume : {quoteVolume}, avg_quote_volume :  {avg_quote_volume}, rate : {rate} ")
             await plot_ticker_quote_volume_graph(symbol)
         
 @debugger("sending telegram...")
 async def send_telegram(buffer):
-    # Create a Telegram bot
-    bot = Bot(token=BOT_ID)
-
     result = None
     # Send the image to the Telegram chat
     try:
         result = await bot.send_photo(chat_id=CHAT_ID, photo=buffer)
+    except ClientError as e: 
+        logging.error(f'Connection error: {e}')
     except Exception as e:
         logging.error(f'error info: {e}')
-    finally:
-        # Close the bot session
-        await bot.close()
+        logging.error(traceback.format_exc())
     return result
     
 @debugger("plotting ticker quote volume graph...")
 async def plot_ticker_quote_volume_graph(symbol:str):
     try:
         df = get_tickers_as_dataframe(symbol)
-        df['closetime'] = pd.to_datetime(df['closetime'])
+        df['closeTime'] = pd.to_datetime(df['closeTime'])
         # autodatelocator will interpret the timezone unless setting localization.
-        df['closetime'] = df['closetime'].dt.tz_localize(None) 
+        df['closeTime'] = df['closeTime'].dt.tz_localize(None) 
 
         fig, ax = plt.subplots()
 
         # Plot the data
-        ax.plot(df['closetime'], df['quoteVolume'], label=symbol)
+        ax.plot(df['closeTime'], df['quoteVolume'], label=symbol)
 
         # format date 
         locator = mdates.AutoDateLocator()
@@ -339,6 +346,7 @@ async def plot_ticker_quote_volume_graph(symbol:str):
 
     except Exception as e:
         logging.error(f'error info: {e}')
+        logging.error(traceback.format_exc())
     
 
 async def strategy1(fetch_interval: str, compare_interval: str, rate: float):
@@ -357,8 +365,12 @@ async def strategy1(fetch_interval: str, compare_interval: str, rate: float):
         time.sleep(interval_string_to_int(fetch_interval))
 
 async def main():
-    await strategy1('15m', '1d', 5)
+    await strategy1('5m', '1d', 5)
+
+async def test():
+    await plot_ticker_quote_volume_graph('BTCUSDT')
 
 if __name__ == "__main__":
     asyncio.run(main())
+    # asyncio.run(test())
     
