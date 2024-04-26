@@ -24,9 +24,56 @@ from sqlalchemy import DateTime, create_engine, Column, Integer, String, Float, 
 from sqlalchemy.orm import sessionmaker, declarative_base
 from typing import List, Dict, Any
 import traceback
-from aiogram.exceptions import TelegramRetryAfter
 
-'''Database'''
+#region Logger
+class Formatter(logging.Formatter):
+    """override logging.Formatter to use an aware datetime object"""
+    def converter(self, timestamp):
+        dt = datetime.fromtimestamp(timestamp)
+        return korean_tz.localize(dt)
+         
+    def formatTime(self, record, datefmt=None):
+        dt = self.converter(record.created)
+        if datefmt:
+            s = dt.strftime(datefmt)
+        else:
+            try:
+                s = dt.isoformat(timespec='milliseconds')
+            except TypeError:
+                s = dt.isoformat()
+        return s
+
+#logging.basicConfig(level=logging.INFO)
+
+# diable other loggers for develop phase 
+sql_logger = logging.getLogger('sqlalchemy.engine.Engine')
+sql_logger.disabled = True
+
+# create root logger
+logger = logging.getLogger()
+logger.setLevel(logging.INFO) # default level : WARNING
+
+# create console handler and set level to error
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+
+# initialize the log file when running again
+fh = logging.FileHandler('log.txt', 'w')
+fh.setLevel(logging.INFO)
+
+# create formatter and apply this only to file handler
+formatter = Formatter('[%(asctime)s] p%(process)s {%(pathname)s:%(lineno)d} %(levelname)s - %(message)s','%m-%d %H:%M:%S')
+
+# add formatter to ch
+ch.setFormatter(formatter)
+fh.setFormatter(formatter)
+
+# add handlers to logger
+logger.addHandler(ch)
+logger.addHandler(fh)
+#endregion
+
+#region Database
 Base = declarative_base()
 
 class Ticker(Base):
@@ -53,8 +100,9 @@ Session = sessionmaker(bind=engine)
 
 # Create all tables in the database
 Base.metadata.create_all(engine)
+#endregion
 
-'''Constants'''
+#region Constants
 korean_tz = pytz.timezone('Asia/Seoul')
 load_dotenv()
 BOT_ID = getenv('TELEGRAM_BOT_TOKEN')
@@ -75,49 +123,9 @@ binance_candletype_host_mapping_dict = {
     CandleType.SPOT: 'https://api.binance.com/api/v3',
     CandleType.FUTURES: 'https://fapi.binance.com/fapi/v1'
 }
+#endregion
 
-'''Logger set'''
-class Formatter(logging.Formatter):
-    """override logging.Formatter to use an aware datetime object"""
-    def converter(self, timestamp):
-        dt = datetime.fromtimestamp(timestamp)
-        return korean_tz.localize(dt)
-         
-    def formatTime(self, record, datefmt=None):
-        dt = self.converter(record.created)
-        if datefmt:
-            s = dt.strftime(datefmt)
-        else:
-            try:
-                s = dt.isoformat(timespec='milliseconds')
-            except TypeError:
-                s = dt.isoformat()
-        return s
-
-# create logger(root logger)
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-# create console handler and set level to debug
-ch = logging.StreamHandler()
-ch.setLevel(logging.INFO)
-
-# initialize the log file when running again
-f = logging.FileHandler('log.txt', 'w')
-f.setLevel(logging.INFO)
-
-# create formatter
-formatter = Formatter('[%(asctime)s] p%(process)s {%(pathname)s:%(lineno)d} %(levelname)s - %(message)s','%m-%d %H:%M:%S')
-
-# add formatter to ch
-ch.setFormatter(formatter)
-f.setFormatter(formatter)
-
-# add handlers to logger
-logger.addHandler(ch)
-logger.addHandler(f)
-
-'''Decorators'''
+#region Decorators
 def debugger(log_prefix=""):
     """decorators for debugging executing time"""
     def decorator(func):
@@ -140,7 +148,9 @@ def debugger(log_prefix=""):
             return ret
         return wrapper
     return decorator
+#endregion
 
+#region ArgumentParser
 # def main():
 #     commands = {
 #         'verbose': function_for_verbose,
@@ -162,8 +172,9 @@ def debugger(log_prefix=""):
 #         print("This is a verbose message.")
 #     else:
 #         print("Hello from SamplePackage!")
+#endregion
 
-'''api functions'''
+#region API
 @debugger("fetching all ticker from binance api...")
 def fetch_all_ticker_binance(candle_type: CandleType)->list:
     url = binance_candletype_host_mapping_dict[candle_type] + '/exchangeInfo'
@@ -183,7 +194,7 @@ def fetch_all_ticker_binance_by_windowsize(candle_type: CandleType, params: dict
             'windowSize': 15m
         }
     '''
-    url = binance_candletype_host_mapping_dict[candle_type] + '/ticker?' + 'symbols=[' + '"' + '","'.join(params["symbols"]) + '"' + ']&windowSize=' + params['windowSize']
+    url = binance_candletype_host_mapping_dict[candle_type] + '/ticker?symbols=[' + '"' + '","'.join(params["symbols"]) + '"' + ']&windowSize=' + params['windowSize']
     response = requests.get(url)
     if response.status_code == 200:
         logger.info(response.status_code)
@@ -194,7 +205,22 @@ def fetch_all_ticker_binance_by_windowsize(candle_type: CandleType, params: dict
     logger.info(f'X-MBX-USED-WEIGHT : {response.headers.get("X-MBX-USED-WEIGHT")}')
     return response.json()
 
-'''model functions'''
+@debugger("fetching kline data from binance api...")
+def fetch_kline_binance(symbol: str, interval: str, limit: int = 500):
+    url = f'https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}'
+    response = requests.get(url)
+    if response.status_code == 200:
+        logger.info(response.status_code)
+        logger.debug(response.json())
+    else:
+        logger.error(response.json())
+
+    logger.info(f'X-MBX-USED-WEIGHT : {response.headers.get("X-MBX-USED-WEIGHT")}')
+    return response.json()
+
+#endregion
+
+#region Model
 @debugger("inserting tickers into database...")
 def insert_tickers(tickers: List[Dict[str, Any]]):
     with Session() as session:
@@ -259,8 +285,9 @@ def get_tickers_as_dataframe(symbol: str):
         ticker = session.query(Ticker).filter(Ticker.symbol == symbol).all()
     
     return pd.DataFrame([t.__dict__ for t in ticker])
+#endregion
 
-'''util functions'''
+#region Util Functions
 def interval_string_to_int(interval: str)->int:
     if interval[-1:] == 'm':
         return int(interval[:-1]) * 60
@@ -270,25 +297,27 @@ def interval_string_to_int(interval: str)->int:
         return int(interval[:-1])
     
 @debugger("comparing quote volume with average...")
-async def compare_quote_volume_with_average(tickers: List[Dict[str, Any]], standard:str, rate:float):
+async def compare_quote_volume_with_average(ticker, standard:str, rate:float)->bool:
     # Convert the average quoteVolumes to a dictionary for easy lookup
     avg_quote_volumes_dict = {symbol: avg for symbol, avg in get_average_quote_volume(standard)}
 
-    for ticker in tickers:
-        symbol = ticker['symbol']
-        quoteVolume = float(ticker['quoteVolume'])
+    symbol = ticker['symbol']
+    quoteVolume = float(ticker['quoteVolume'])
 
-        # Get the average quoteVolume for this symbol
-        avg_quote_volume = float(avg_quote_volumes_dict.get(symbol, 0))  # Add default value of 0
+    # Get the average quoteVolume for this symbol
+    avg_quote_volume = float(avg_quote_volumes_dict.get(symbol, 0))  # Add default value of 0
 
-        if avg_quote_volume == 0:
-            logger.warning(f"No average quoteVolume found for symbol {symbol}")
-            continue
+    if avg_quote_volume == 0:
+        logger.warning(f"No average quoteVolume found for symbol {symbol}")
+        return False
 
-        # Compare the ticker's quoteVolume with the average and quoteVolume is greater than 100,000$
-        if quoteVolume >= avg_quote_volume * rate and quoteVolume > 100_000:
-            logger.info(f"symbol : {symbol}, quoteVolume : {quoteVolume}, avg_quote_volume :  {avg_quote_volume}, rate : {rate} ")
-            await plot_ticker_quote_volume_graph(symbol)
+    # main logic is here!
+    # Compare the ticker's quoteVolume with the average and quoteVolume is greater than 100,000$
+    if quoteVolume >= avg_quote_volume * rate and quoteVolume > 100_000:
+        logger.info(f"symbol : {symbol}, quoteVolume : {quoteVolume}, avg_quote_volume :  {avg_quote_volume}, rate : {rate} ")
+        return True
+    
+    return False
         
 @debugger("sending telegram...")
 async def send_telegram(buffer):
@@ -304,7 +333,7 @@ async def send_telegram(buffer):
     return result
     
 @debugger("plotting ticker quote volume graph...")
-async def plot_ticker_quote_volume_graph(symbol:str):
+async def plot_ticker_quote_volume_graph(symbol:str, **userData):
     try:
         df = get_tickers_as_dataframe(symbol)
         df['closeTime'] = pd.to_datetime(df['closeTime'])
@@ -315,6 +344,9 @@ async def plot_ticker_quote_volume_graph(symbol:str):
 
         # Plot the data
         ax.plot(df['closeTime'], df['quoteVolume'], label=symbol)
+
+        for key, dataFrame in userData.items():
+            ax.plot(dataFrame['closeTime'], dataFrame['value'])
 
         # format date 
         locator = mdates.AutoDateLocator()
@@ -347,8 +379,10 @@ async def plot_ticker_quote_volume_graph(symbol:str):
     except Exception as e:
         logging.error(f'error info: {e}')
         logging.error(traceback.format_exc())
-    
 
+#endregion
+
+#region Strategy Functions
 async def strategy1(fetch_interval: str, compare_interval: str, rate: float):
     '''
     strategy1 function
@@ -359,18 +393,35 @@ async def strategy1(fetch_interval: str, compare_interval: str, rate: float):
         
         for ticker_batch in ticker_batches:
             res = fetch_all_ticker_binance_by_windowsize(CandleType.SPOT, {'symbols': ticker_batch, 'windowSize': fetch_interval})
-            await compare_quote_volume_with_average(res, compare_interval, rate)
-            insert_tickers(res)
+
+            for ticker in res:
+                alarm_yn = await compare_quote_volume_with_average(ticker, compare_interval, rate)
+                insert_tickers(res)
+                if alarm_yn:
+                    await plot_ticker_quote_volume_graph(ticker['symbol'])
 
         time.sleep(interval_string_to_int(fetch_interval))
+#endregion
 
 async def main():
     await strategy1('5m', '1d', 5)
 
-async def test():
-    await plot_ticker_quote_volume_graph('BTCUSDT')
+@debugger("UnitTest...")
+async def UnitTest():
+    #await plot_two_graph_test('BTCUSDT', 'ETHUSDT')
+    res = fetch_kline_binance('BTCUSDT', '5m', 500)
+    data = [[kline[6], kline[10]] for kline in res]
+
+    df = pd.DataFrame(data, columns=['closeTime', 'value'])
+    df['closeTime'] = pd.to_datetime(df['closeTime'], unit='ms')
+    df['closeTime'] = df['closeTime'].dt.tz_localize(pytz.utc)
+    df['closeTime'] = df['closeTime'].dt.tz_convert('Asia/Seoul')
+    df['value'] = df['value'].astype(float)
+    print(df)
+    await plot_ticker_quote_volume_graph('BTCUSDT', userData1=df)
 
 if __name__ == "__main__":
-    asyncio.run(main())
-    # asyncio.run(test())
+    #asyncio.run(main())
+    asyncio.run(UnitTest())
+    
     
