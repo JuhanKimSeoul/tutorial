@@ -222,37 +222,41 @@ def fetch_kline_binance(symbol: str, interval: str, limit: int = 500):
 
 #region Model
 @debugger("inserting tickers into database...")
-def insert_tickers(tickers: List[Dict[str, Any]]):
+def insert_ticker(ticker: Dict[str, Any]):
     with Session() as session:
-        for ticker in tickers:
-            # Convert epoch time to UTC time
-            openTime = datetime.fromtimestamp(ticker['openTime'] / 1000, tz=timezone.utc)
-            closeTime = datetime.fromtimestamp(ticker['closeTime'] / 1000, tz=timezone.utc)
+        # Convert epoch time to UTC time
+        openTime = datetime.fromtimestamp(ticker['openTime'] / 1000, tz=timezone.utc)
+        closeTime = datetime.fromtimestamp(ticker['closeTime'] / 1000, tz=timezone.utc)
 
-            # Convert UTC time to Korean time
-            openTime = openTime.astimezone(korean_tz)
-            closeTime = closeTime.astimezone(korean_tz)
+        # Convert UTC time to Korean time
+        openTime = openTime.astimezone(korean_tz)
+        closeTime = closeTime.astimezone(korean_tz)
 
-            ticker_obj = Ticker(
-                symbol=ticker['symbol'],
-                closeTime=closeTime,
-                openTime=openTime,
-                priceChange=ticker['priceChange'],
-                priceChangePercent=ticker['priceChangePercent'],
-                weightedAvgPrice=ticker['weightedAvgPrice'],
-                openPrice=ticker['openPrice'],
-                highPrice=ticker['highPrice'],
-                lowPrice=ticker['lowPrice'],
-                lastPrice=ticker['lastPrice'],
-                volume=ticker['volume'],
-                quoteVolume=ticker['quoteVolume'],
-                firstId=ticker['firstId'],
-                lastId=ticker['lastId'],
-                count=ticker['count']
-            )
-            session.add(ticker_obj)
+        ticker_obj = Ticker(
+            symbol=ticker['symbol'],
+            closeTime=closeTime,
+            openTime=openTime,
+            priceChange=ticker['priceChange'],
+            priceChangePercent=ticker['priceChangePercent'],
+            weightedAvgPrice=ticker['weightedAvgPrice'],
+            openPrice=ticker['openPrice'],
+            highPrice=ticker['highPrice'],
+            lowPrice=ticker['lowPrice'],
+            lastPrice=ticker['lastPrice'],
+            volume=ticker['volume'],
+            quoteVolume=ticker['quoteVolume'],
+            firstId=ticker['firstId'],
+            lastId=ticker['lastId'],
+            count=ticker['count']
+        )
+        session.add(ticker_obj)
 
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            logger.error(f"An error occurred: {e}")
+            session.rollback()
+            raise e
 
 @debugger("getting average quote volume...")
 def get_average_quote_volume(standard:str)->List:
@@ -319,7 +323,6 @@ async def compare_quote_volume_with_average(ticker, standard:str, rate:float)->b
     
     return False
         
-@debugger("sending telegram...")
 async def send_telegram(buffer):
     result = None
     # Send the image to the Telegram chat
@@ -331,7 +334,82 @@ async def send_telegram(buffer):
         logging.error(f'error info: {e}')
         logging.error(traceback.format_exc())
     return result
+
+@debugger("transforming into dataframe...")
+def transform_into_dataframe(*args, data:List[List[Any]])->pd.DataFrame:
+    '''
+    transform data into dataframe
+    ex) transform_into_dataframe((4,'closePrice'), (6,'closeTime'), (10,'quoteVolume'), data=data)
+    '''
+    extracted_data = []
+    for el in data:
+        tmp = []
+        for arg in args:
+            tmp.append(el[arg[0]])
+        extracted_data.append(tmp)
+
+    df = pd.DataFrame(extracted_data, columns=[arg[1] for arg in args])
+
+    if 'closeTime' in df.columns:
+        df['closeTime'] = pd.to_datetime(df['closeTime'], unit='ms')
+        df['closeTime'] = df['closeTime'].dt.tz_localize(pytz.utc)
+        df['closeTime'] = df['closeTime'].dt.tz_convert('Asia/Seoul')
+        df['closeTime'] = df['closeTime'].dt.tz_localize(None)
+
+    for col in df.columns:
+        if 'Price' in col or 'Volume' in col:
+            df[col] = df[col].astype(float)
+
+    if 'closePrice' in df.columns:
+        df['closePrice'] = df['closePrice'] / df['closePrice'].iloc[0] * 100
+
+    return df
     
+@debugger("plot_diagram_into_buffer...")
+def plot_diagram_into_buffer(*args, **kwargs):
+    '''
+    plot one figure with multiple subplots by vertically
+    ex) plot_diagram(('closeTime', 'closePrice'), ('closeTime', 'quoteVolume'), BTCUSDT=df1, ETHUSDT=df2)
+    '''
+    fig, ax = plt.subplots(len(args), 1, figsize=(12, 12))
+
+    i = 0
+    for x, y in args:
+        for key, dataFrame in kwargs.items():
+            # if x == 'closeTime' then format date
+            if x == 'closeTime':
+                locator = mdates.AutoDateLocator()
+                ax[i].xaxis.set_major_locator(locator)
+                ax[i].xaxis.set_major_formatter(mdates.AutoDateFormatter(locator))
+                # Rotate x-axis labels for better readability
+                plt.xticks(rotation=45)
+
+            if (y == 'quoteVolume' or y == 'takerBuyQuoteVolume') and key != 'BTCUSDT':
+                ax2 = ax[i].twinx()
+                ax2.plot(dataFrame[x], dataFrame[y], label=key, color='r')
+                ax2.legend()
+            else:
+                # Plot the price value
+                ax[i].plot(dataFrame[x], dataFrame[y], label=key)
+
+            ax[i].legend()
+
+        i += 1
+
+    # Create a BytesIO buffer to save the Matplotlib plot image in memory
+    buffer = io.BytesIO()
+    plt.savefig(buffer)
+
+    # moves the file pointer to the beginning of the buffer
+    buffer.seek(0)
+
+    # upload from buffer
+    buf_trs = types.BufferedInputFile(buffer.getvalue(), filename=f'plot.png')
+
+    # plt.show()
+    plt.close()
+    return buf_trs
+
 @debugger("plotting ticker quote volume graph...")
 async def plot_ticker_quote_volume_graph(symbol:str, **userData):
     try:
@@ -344,9 +422,9 @@ async def plot_ticker_quote_volume_graph(symbol:str, **userData):
 
         # Plot the data
         ax.plot(df['closeTime'], df['quoteVolume'], label=symbol)
-
+        
         for key, dataFrame in userData.items():
-            ax.plot(dataFrame['closeTime'], dataFrame['value'])
+            ax.plot(dataFrame['closeTime'], dataFrame['quoteVolume'])
 
         # format date 
         locator = mdates.AutoDateLocator()
@@ -379,7 +457,6 @@ async def plot_ticker_quote_volume_graph(symbol:str, **userData):
     except Exception as e:
         logging.error(f'error info: {e}')
         logging.error(traceback.format_exc())
-
 #endregion
 
 #region Strategy Functions
@@ -396,32 +473,97 @@ async def strategy1(fetch_interval: str, compare_interval: str, rate: float):
 
             for ticker in res:
                 alarm_yn = await compare_quote_volume_with_average(ticker, compare_interval, rate)
-                insert_tickers(res)
+                insert_ticker(ticker)
+                
                 if alarm_yn:
-                    await plot_ticker_quote_volume_graph(ticker['symbol'])
+                    df = transform_into_dataframe((4,'closePrice'), (6,'closeTime'), (7,'quoteVolume'), (10,'takerBuyQuoteVolume'), data=fetch_kline_binance(ticker['symbol'], '5m', 500))
+                    if ticker['symbol'] == 'BTCUSDT':
+                        comp_symbol = 'ETHUSDT'
+                    else:
+                        comp_symbol = 'BTCUSDT'
+                    comp_df = transform_into_dataframe((4,'closePrice'), (6,'closeTime'), (10,'quoteVolume'), (10,'takerBuyQuoteVolume'), data=fetch_kline_binance(comp_symbol, '5m', 500))
+                    
+                    if ticker['symbol'] == 'BTCUSDT':
+                        buf = plot_diagram_into_buffer(('closeTime', 'closePrice'), ('closeTime', 'quoteVolume'), ('closeTime', 'takerBuyQuoteVolume'), **{'ETHUSDT': comp_df, ticker['symbol']: df})
+                    else:
+                        buf = plot_diagram_into_buffer(('closeTime', 'closePrice'), ('closeTime', 'quoteVolume'), ('closeTime', 'takerBuyQuoteVolume'), **{'BTCUSDT': comp_df, ticker['symbol']: df})
+                    await send_telegram(buf)
+                    # await plot_ticker_quote_volume_graph(ticker['symbol'])
 
         time.sleep(interval_string_to_int(fetch_interval))
+#endregion
+
+#region UnitTest
+@debugger("UnitTest...")
+async def UnitTest():
+    #await plot_two_graph_test('BTCUSDT', 'ETHUSDT')
+    res = fetch_kline_binance('BTCUSDT', '5m', 500)
+    data = [[kline[4], kline[6], kline[10]] for kline in res]
+
+    df = pd.DataFrame(data, columns=['closePrice', 'closeTime', 'quoteVolume'])
+    df['closeTime'] = pd.to_datetime(df['closeTime'], unit='ms')
+    df['closeTime'] = df['closeTime'].dt.tz_localize(pytz.utc)
+    df['closeTime'] = df['closeTime'].dt.tz_convert('Asia/Seoul')
+    df['closeTime'] = df['closeTime'].dt.tz_localize(None)
+    df['quoteVolume'] = df['quoteVolume'].astype(float)
+    df['closePrice'] = df['closePrice'].astype(float)
+    # Normalize the 'quoteVolume' series to its initial value
+    df['closePrice'] = df['closePrice'] / df['closePrice'].iloc[0] * 100
+    await plot_ticker_quote_volume_graph('BTCUSDT', userData1=df)
+
+def UnitTest2():
+    res = fetch_kline_binance('BTCUSDT', '5m', 500)
+    data = [[kline[4], kline[6], kline[10]] for kline in res]
+
+    df = pd.DataFrame(data, columns=['closePrice', 'closeTime', 'quoteVolume'])
+    df['closeTime'] = pd.to_datetime(df['closeTime'], unit='ms')
+    df['closeTime'] = df['closeTime'].dt.tz_localize(pytz.utc)
+    df['closeTime'] = df['closeTime'].dt.tz_convert('Asia/Seoul')
+    df['closeTime'] = df['closeTime'].dt.tz_localize(None)
+    df['quoteVolume'] = df['quoteVolume'].astype(float)
+    df['closePrice'] = df['closePrice'].astype(float)
+    # Normalize the 'quoteVolume' series to its initial value
+    df['closePrice'] = df['closePrice'] / df['closePrice'].iloc[0] * 100
+
+    res2 = fetch_kline_binance('ETHUSDT', '5m', 500)
+    data2 = [[kline[4], kline[6], kline[10]] for kline in res2]
+
+    df2 = pd.DataFrame(data2, columns=['closePrice', 'closeTime', 'quoteVolume'])
+    df2['closeTime'] = pd.to_datetime(df2['closeTime'], unit='ms')
+    df2['closeTime'] = df2['closeTime'].dt.tz_localize(pytz.utc)
+    df2['closeTime'] = df2['closeTime'].dt.tz_convert('Asia/Seoul')
+    df2['closeTime'] = df2['closeTime'].dt.tz_localize(None)
+    df2['quoteVolume'] = df2['quoteVolume'].astype(float)
+    df2['closePrice'] = df2['closePrice'].astype(float)
+    # Normalize the 'quoteVolume' series to its initial value
+    df2['closePrice'] = df2['closePrice'] / df2['closePrice'].iloc[0] * 100
+
+async def UnitTest3():
+    res = fetch_all_ticker_binance_by_windowsize(CandleType.SPOT, {'symbols': ['HIFIUSDT'], 'windowSize': '5m'})
+
+    for ticker in res:
+        alarm_yn = await compare_quote_volume_with_average(ticker, '1d', 5)
+        insert_ticker(ticker)
+        # if alarm_yn:
+        df = transform_into_dataframe((4,'closePrice'), (6,'closeTime'), (7,'quoteVolume'), (10,'takerBuyQuoteVolume'), data=fetch_kline_binance(ticker['symbol'], '5m', 500))
+        if ticker['symbol'] == 'BTCUSDT':
+            comp_symbol = 'ETHUSDT'
+        else:
+            comp_symbol = 'BTCUSDT'
+        comp_df = transform_into_dataframe((4,'closePrice'), (6,'closeTime'), (10,'quoteVolume'), (10,'takerBuyQuoteVolume'), data=fetch_kline_binance(comp_symbol, '5m', 500))
+        
+        if ticker['symbol'] == 'BTCUSDT':
+            buf = plot_diagram_into_buffer(('closeTime', 'closePrice'), ('closeTime', 'quoteVolume'), ('closeTime', 'takerBuyQuoteVolume'), **{'ETHUSDT': comp_df, ticker['symbol']: df})
+        else:
+            buf = plot_diagram_into_buffer(('closeTime', 'closePrice'), ('closeTime', 'quoteVolume'), ('closeTime', 'takerBuyQuoteVolume'), **{'BTCUSDT': comp_df, ticker['symbol']: df})
+        await send_telegram(buf)
 #endregion
 
 async def main():
     await strategy1('5m', '1d', 5)
 
-@debugger("UnitTest...")
-async def UnitTest():
-    #await plot_two_graph_test('BTCUSDT', 'ETHUSDT')
-    res = fetch_kline_binance('BTCUSDT', '5m', 500)
-    data = [[kline[6], kline[10]] for kline in res]
-
-    df = pd.DataFrame(data, columns=['closeTime', 'value'])
-    df['closeTime'] = pd.to_datetime(df['closeTime'], unit='ms')
-    df['closeTime'] = df['closeTime'].dt.tz_localize(pytz.utc)
-    df['closeTime'] = df['closeTime'].dt.tz_convert('Asia/Seoul')
-    df['value'] = df['value'].astype(float)
-    print(df)
-    await plot_ticker_quote_volume_graph('BTCUSDT', userData1=df)
-
 if __name__ == "__main__":
-    #asyncio.run(main())
-    asyncio.run(UnitTest())
-    
+    asyncio.run(main())
+    # asyncio.run(UnitTest3())
+    # UnitTest2()    
     
