@@ -1,12 +1,14 @@
 from flask import Flask
-from controllers.departement_controller import DepartmentController
-from controllers.employee_controller import EmployeeController
+import models # Importing models to define models before controllers. Because in controllers, we are using schema classes, so it won't be instantiated without models.
+from controllers import DepartmentController, EmployeeController
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.orm import sessionmaker, scoped_session 
+from models.base import Base
 
 app = Flask(__name__)
 
 engine = create_engine('sqlite:///database.db', echo=True)
+Base.metadata.create_all(engine)
 
 session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=True)
 session = scoped_session(session_factory)

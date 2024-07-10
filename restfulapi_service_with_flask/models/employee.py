@@ -1,8 +1,7 @@
 from sqlalchemy import Column, ForeignKey, Integer, String
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-
-Base = declarative_base()
+from models.base import Base
+from marshmallow_sqlalchemy import SQLAlchemyAutoSchema
 
 class Employee(Base):
     __tablename__ = 'employee'
@@ -12,3 +11,8 @@ class Employee(Base):
     address = Column(String(100))
     department_id = Column(Integer, ForeignKey('department.id'))
     department = relationship("Department", back_populates="employees")
+
+# class EmployeeSchema(SQLAlchemyAutoSchema):
+#     class Meta:
+#         model = Employee
+#         load_instance = True  # Enables deserialization into model instances
