@@ -1,11 +1,11 @@
 # Tutorial
 
-## Get used to Flask
+## 1. Get used to Flask
 
 - ✅ Make a simple HTTP Restful API Service with MVC pattern using Python, Flask
 - ☑️ Adapt pytest and get used to it by using it on the project above(HTTP Restful API Service with MVC pattern)
 
-## How to set logger in production
+## 2. How to set logger in production
 
 ### Motivation
 
@@ -74,6 +74,98 @@ logger = logging.getLogger('test1') # use user-defined name instead
 
 - If you still want to use file type, then you can make a json file and use json.load. In that way, you can use file so that your source code doesn't need to be changed and also dynamically change the logger configuration.
 
-## Get used to Spring(Java)
+## 3. fastapi app incorporated with celery
 
-- ☑️ Make a simple shoppingmall application using Spring, Java
+### overview
+
+Seperate the restful web api(FastAPI) service from constantly running backend server which is for requesting and accepting the data from the another API server. However we don't need the another backend server. The celery can replace it especially with this case of program which is running an infinite scheduled program. As we configure the broker and backend server(DB), the celery(beat) should send a scheduled task to a broker(rabbitmq) and then the broker convey it to an allocated celery(worker) to make it. This flow can be visualized and well-managed by flower packages which provides a web page to easily change the configuration dynamically such as worker pool, task rate limit and etc.
+
+### main packages
+
+- fastapi : for web application
+- celery : replacing a backend server to process tasks independent of the main application
+- flower : visualize and manage the whole celery process
+- uvicorn : ASGI for performance and handling concurrent requests
+
+### main techniques
+
+- redis
+- rabbitmq
+
+### running fastapi web application
+
+```python
+uvicorn main:app --reload # running fastapi web application
+```
+
+### connect the flower app to celery and broker
+
+```python
+celery -A core flower --broker=amqp://localhost # running flower app, core is the name of file in which celery app located.
+# fastapi web server runs at default 8000 port
+```
+
+```bash
+# the results
+# default port : 5555
+INFO:flower.command:Visit me at http://0.0.0.0:5555
+INFO:flower.command:Broker: amqp://guest:**@localhost:5672//
+INFO:flower.command:Registered tasks:
+['celery.accumulate',
+ 'celery.backend_cleanup',
+ 'celery.chain',
+ 'celery.chord',
+ 'celery.chord_unlock',
+ 'celery.chunks',
+ 'celery.group',
+ 'celery.map',
+ 'celery.starmap',
+ 'core.fetch_market_data',
+ 'core.fetch_orderbook_data']
+```
+
+### running a celery worker
+
+```python
+celery -A core worker --loglevel=info --logfile=./worker.log
+```
+
+```bash
+ -------------- celery@Kims-MacBook-Pro.local v5.4.0 (opalescent)
+--- ***** -----
+-- ******* ---- macOS-14.6.1-arm64-arm-64bit 2024-09-09 00:55:10
+- *** --- * ---
+- ** ---------- [config]
+- ** ---------- .> app:         tasks:0x1085a5210
+- ** ---------- .> transport:   amqp://guest:**@localhost:5672//
+- ** ---------- .> results:     redis://localhost:6379/0
+- *** --- * --- .> concurrency: 12 (prefork)
+-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+--- ***** -----
+ -------------- [queues]
+                .> celery           exchange=celery(direct) key=celery
+
+
+[tasks]
+  . core.fetch_market_data
+  . core.fetch_orderbook_data
+```
+
+### running a celery scheduler
+
+```python
+celery -A core beat --loglevel=info --logfile=./beat.log
+```
+
+```bash
+celery beat v5.4.0 (opalescent) is starting.
+__    -    ... __   -        _
+LocalTime -> 2024-09-09 00:55:26
+Configuration ->
+    . broker -> amqp://guest:**@localhost:5672//
+    . loader -> celery.loaders.app.AppLoader
+    . scheduler -> celery.beat.PersistentScheduler
+    . db -> celerybeat-schedule
+    . logfile -> ./beat.log@%INFO
+    . maxinterval -> 5.00 minutes (300s)
+```

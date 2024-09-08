@@ -1,0 +1,15 @@
+[project]
+name = "celery-with-fastapi"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "ccxt>=4.3.98",
+    "celery>=5.4.0",
+    "fastapi>=0.114.0",
+    "flower>=2.0.1",
+    "orjson>=3.10.7",
+    "redis>=5.0.8",
+    "uvicorn>=0.30.6",
+]
