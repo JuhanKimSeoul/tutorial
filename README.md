@@ -5,6 +5,10 @@
 - ✅ Make a simple HTTP Restful API Service with MVC pattern using Python, Flask
 - ☑️ Adapt pytest and get used to it by using it on the project above(HTTP Restful API Service with MVC pattern)
 
+
+
+
+
 ## 2. How to set logger in production
 
 ### Motivation
@@ -73,6 +77,11 @@ logger = logging.getLogger('test1') # use user-defined name instead
 - log.config.dictconfig : can dynamically make instance of user-defined filter(function or class) to adapt into the logger. You can see and check the client_dictconfig.py.
 
 - If you still want to use file type, then you can make a json file and use json.load. In that way, you can use file so that your source code doesn't need to be changed and also dynamically change the logger configuration.
+
+
+
+
+
 
 ## 3. fastapi app incorporated with celery
 
