@@ -1,2 +1,9 @@
 .pytest_cache/
 __pycache__/
+*.log
+*.lock
+.venv/
+tests/
+*.db
+.env.*
+.env

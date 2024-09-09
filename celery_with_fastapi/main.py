@@ -1,27 +1,35 @@
-from fastapi import FastAPI
-import redis
-import orjson
-from core import fetch_market_data
+import os
+import click
+import uvicorn
 
-app = FastAPI()
+@click.command()
+@click.option(
+    "--env",
+    type=click.Choice(["development", "test", "production"]),
+    default="development",
+    help="The environment to run the server in",
+)
+@click.option(
+    "--debug",
+    type=click.BOOL,
+    is_flag=True,
+    default=False,
+)
+def main(env, debug):
+    os.environ["ENV"] = env
+    os.environ["DEBUG"] = str(debug)
 
-r = redis.Redis(host='localhost', port=6379, db=0)
+    from config import get_config, load_log_config
+    config = get_config()
+    load_log_config()
 
-@app.get('/cached_market_data/{exchange_id}')
-async def get_cached_market_data(exchange_id: str):
-    market_data = r.get(f'market_data_{exchange_id}')
-    if market_data:
-        return orjson.loads(market_data)
-    return {'status' : 403, 'message' : 'Market data not found'}
-
-@app.get('/market_data/{exchange_id}')
-async def get_market_data(exchange_id: str):
-    task = fetch_market_data.delay(exchange_id)
-    return {'status' : 200, 'task_id' : task.id}
-
-@app.get('/orderbook_data/{exchange_id}/{target_symbol}')
-async def get_orderbook_data(exchange_id: str, target_symbol: str):
-    orderbook_data = r.get(f'orderbook_data_{exchange_id}_{target_symbol}')
-    if orderbook_data:
-        return orjson.loads(orderbook_data)
-    return {'status' : 403, 'message' : 'Orderbook data not found'}
+    uvicorn.run(
+        app="app.server:app",
+        host=config.APP_HOST,
+        port=config.APP_PORT,
+        reload=True if env == "development" else False,
+        workers=1
+    )
+    
+if __name__ == "__main__":
+    main()

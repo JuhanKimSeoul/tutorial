@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+
+  "loggers": {
+    "root": {
+      "level": "DEBUG",
+      "handlers": ["consoleHandler"]
+    }
+  },
+
+  "filters": {
+    "specificLoggerFilter": {
+      "()": "helpers.custom_log_filter.filter_maker",
+      "logger": "test1"
+    }
+  },
+
+  "handlers": {
+    "consoleHandler": {
+      "class": "logging.StreamHandler",
+      "level": "DEBUG",
+      "formatter": "simpleFormatter",
+      "stream": "ext://sys.stdout",
+      "filters": ["specificLoggerFilter"]
+    },
+    "timed_rotating_file": {
+      "class": "helpers.custom_log_file_handler.CustomTimedRotatingFileHandler",
+      "level": "INFO",
+      "formatter": "simple",
+      "filename": "app.log",
+      "when": "midnight",
+      "interval": 1,
+      "backupCount": 7
+    }
+  },
+
+  "formatters": {
+    "simpleFormatter": {
+      "format": "%(asctime)s - %(threadName)s - %(name)s - %(lineno)d - %(levelname)s - %(message)s"
+    }
+  }
+}

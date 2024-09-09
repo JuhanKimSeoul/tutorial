@@ -1,0 +1,17 @@
+exchanges:
+  allowed:
+    binance: true
+    coinbase: true
+    upbit: true
+    bybit: true
+  restricted:
+    bitmex: false
+    bitfinex: false
+    bittrex: false
+    kraken: false
+    kucoin: false
+    huobi: false
+    okex: false
+    ftx: false
+    gateio: false
+    poloniex: false
