@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     API_SECRET: str
     APP_HOST: str
     APP_PORT: int
+    WRITER_DB_URL: str
+    READER_DB_URL: str
 
     class Config:
         env_file = f".env.{ENV}"
