@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase, Session
 from sqlalchemy.sql import Delete, Insert, Update
 
-from celery_with_fastapi.config import get_config
-from celery_with_fastapi.enums.constant import EngineType
+from config import get_config
+from enums.constant import EngineType
 config = get_config()
 
 class Base(DeclarativeBase):
@@ -36,7 +36,7 @@ engines = {
 }
 
 class RoutingSession(Session):
-    def get_bind(self, mapper=None, clause=None, **):
+    def get_bind(self, mapper=None, clause=None, **kw):
         if self._flushing or isinstance(clause, (Insert, Update, Delete)):
             return engines[EngineType.WRITER].sync_engine 
         else:

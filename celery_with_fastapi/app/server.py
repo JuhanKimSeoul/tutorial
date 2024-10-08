@@ -1,27 +1,49 @@
 from fastapi import FastAPI
-import redis
-import orjson
-# from celery_with_fastapi.celery import fetch_market_data
+from fastapi.middleware import Middleware
+from fastapi.middleware.cors import CORSMiddleware
+import os
+from app.user.adapter.api.v1.router import user_router
+from app.container import Container
 
-app = FastAPI()
+def init_routers(app: FastAPI)->None:
+    container = Container()
+    user_router.container = container
+    app.include_router(user_router, prefix="/api/v1/user")
 
-r = redis.Redis(host='localhost', port=6379, db=0)
+def init_middlewares(app: FastAPI)->None:
+    middlewares = [
+        Middleware(
+            CORSMiddleware,
+            allow_origins=["http://localhost", "http://127.0.0.1"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        ),
+        Middleware(Sq)
+    ]
 
-@app.get('/cached_market_data/{exchange_id}')
-async def get_cached_market_data(exchange_id: str):
-    market_data = r.get(f'market_data_{exchange_id}')
-    if market_data:
-        return orjson.loads(market_data)
-    return {'status' : 403, 'message' : 'Market data not found'}
+    return middlewares
 
-# @app.get('/market_data/{exchange_id}')
-# async def get_market_data(exchange_id: str):
-#     task = fetch_market_data.delay(exchange_id)
-#     return {'status' : 200, 'task_id' : task.id}
+def init_exception_handlers(app: FastAPI)->None:
+    pass
 
-@app.get('/orderbook_data/{exchange_id}/{target_symbol}')
-async def get_orderbook_data(exchange_id: str, target_symbol: str):
-    orderbook_data = r.get(f'orderbook_data_{exchange_id}_{target_symbol}')
-    if orderbook_data:
-        return orjson.loads(orderbook_data)
-    return {'status' : 403, 'message' : 'Orderbook data not found'}
+def init_db(app: FastAPI)->None:
+    pass
+
+def create_app()->FastAPI:
+    app_ = FastAPI(
+        title="FastAPI with Celery",
+        description="This is a simple example of FastAPI with Celery.",
+        version="0.1.0",
+        docs_url=None if os.getenv("ENV") == "production" else "/docs",
+        redoc_url=None if os.getenv("ENV") == "production" else "/redoc",
+        dependencies=[],
+        middleware=[],
+    )
+    init_routers(app_)
+    init_middlewares(app_)
+    init_exception_handlers(app_)
+    init_db(app_)
+    return app_
+
+app = create_app()

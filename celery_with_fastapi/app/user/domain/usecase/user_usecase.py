@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from celery_with_fastapi.app.user.adapter.api.v1.request import CreateUserRequest, LoginRequest
-from celery_with_fastapi.app.user.domain.entity.user import User
-from celery_with_fastapi.app.user.application.dto import LoginResponseDTO
+from app.user.adapter.api.v1.request import CreateUserRequest, LoginRequest
+from app.user.domain.entity.user import User
+from app.user.application.dto import LoginResponseDTO
 
 class UserUseCase(ABC):
     @abstractmethod

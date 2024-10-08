@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from app.user.domain.entity.user import User
-from celery_with_fastapi.app.user.domain.repository.user_repository import UserRepository
+from app.user.domain.repository.user_repository import UserRepository
 from core.db.session import session, session_factory
 
 class UserRepositoryImpl(UserRepository):

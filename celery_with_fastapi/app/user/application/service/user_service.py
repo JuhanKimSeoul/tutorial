@@ -1,9 +1,9 @@
-from celery_with_fastapi.app.user.adapter.api.v1.request import CreateUserRequest, LoginRequest
-from celery_with_fastapi.app.user.adapter.persistence.repository_adapter import UserRepositoryAdapter
-from celery_with_fastapi.app.user.application.dto import LoginResponseDTO
-from celery_with_fastapi.app.user.domain.entity.user import User, UserRead
-from celery_with_fastapi.app.user.domain.usecase.user_usecase import UserUseCase
-from celery_with_fastapi.core.db.transactional import Transactional
+from app.user.adapter.api.v1.request import CreateUserRequest, LoginRequest
+from app.user.adapter.persistence.repository_adapter import UserRepositoryAdapter
+from app.user.application.dto import LoginResponseDTO
+from app.user.domain.entity.user import User, UserRead
+from app.user.domain.usecase.user_usecase import UserUseCase
+from core.db.transactional import Transactional
 
 class UserService(UserUseCase):
     def __init__(self, repository: UserRepositoryAdapter):

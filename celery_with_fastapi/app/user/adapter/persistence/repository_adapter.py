@@ -1,6 +1,6 @@
 from typing import List
-from celery_with_fastapi.app.user.domain.entity import User, UserRead
-from celery_with_fastapi.app.user.domain.repository import UserRepository
+from app.user.domain.entity import User, UserRead
+from app.user.domain.repository import UserRepository
 
 class UserRepositoryAdapter:
     def __init__(self, repository: UserRepository):

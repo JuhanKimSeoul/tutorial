@@ -86,5 +86,6 @@ app.conf.update(
     task_acks_on_failure_or_timeout=True,
     worker_prefetch_multiplier=1,
     task_track_started=True,
+    result_expires=3600,
 )
 
