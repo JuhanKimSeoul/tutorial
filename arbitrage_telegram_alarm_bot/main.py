@@ -34,6 +34,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 import sqlite3
 import copy
 
@@ -579,10 +580,25 @@ class UpbitManager(ExchangeManager):
     def get_depwith_status(self, market=None):
         url = "https://upbit.com/service_center/wallet_status?is_retargeting=true&source_caller=ui&shortlink=gd2ruhr7&c=wallet_status&pid=wallet_status&af_xp=custom"
         
+        # options = Options()
+        # options.headless = True
+        # service = Service('/usr/local/bin/chromedriver')  # ChromeDriver 경로 설정
+        # driver = webdriver.Chrome(service=service, options=options)
+
+        # WebDriverManager를 사용해 ChromeDriver 설정
         options = Options()
-        options.headless = True
-        service = Service('/usr/local/bin/chromedriver')  # ChromeDriver 경로 설정
-        driver = webdriver.Chrome(service=service, options=options)
+        options.add_argument('--headless')  # 창 없이 실행
+        options.add_argument('--no-sandbox')  # 샌드박스 모드 비활성화 (Linux 환경)
+        options.add_argument('--disable-blink-features=AutomationControlled')  # 자동화 탐지 방지
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--disable-extensions')
+        options.add_argument('--remote-debugging-port=9222')  # 디버깅 포트 추가
+        options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.108 Safari/537.36')
+
+        # ChromeDriverManager를 통해 ChromeDriver 경로 설정
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
         # 웹 페이지 로드
         driver.get(url)
@@ -818,10 +834,25 @@ class BithumbManager(ExchangeManager):
     def get_depwith_status(self, market=None):
         url = "https://www.bithumb.com/react/info/inout-condition"
         
+        # options = Options()
+        # options.headless = True
+        # service = Service('/usr/local/bin/chromedriver')  # ChromeDriver 경로 설정
+        # driver = webdriver.Chrome(service=service, options=options)
+
+        # WebDriverManager를 사용해 ChromeDriver 설정
         options = Options()
-        options.headless = True
-        service = Service('/usr/local/bin/chromedriver')  # ChromeDriver 경로 설정
-        driver = webdriver.Chrome(service=service, options=options)
+        options.add_argument('--headless')  # 창 없이 실행
+        options.add_argument('--no-sandbox')  # 샌드박스 모드 비활성화 (Linux 환경)
+        options.add_argument('--disable-blink-features=AutomationControlled')  # 자동화 탐지 방지
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--disable-extensions')
+        options.add_argument('--remote-debugging-port=9222')  # 디버깅 포트 추가
+        options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.108 Safari/537.36')
+
+        # ChromeDriverManager를 통해 ChromeDriver 경로 설정
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         
         driver.get(url)
         
@@ -3376,6 +3407,7 @@ async def break_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stop_event.set()
     await task
     await update.message.reply_text(f'{context.user_data["event_caller"]}가 정상적으로 종료되었습니다.')
+    return ConversationHandler.END
 
 # 취소 버튼 핸들러
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
