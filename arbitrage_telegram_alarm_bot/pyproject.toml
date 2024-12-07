@@ -1,0 +1,12 @@
+[project]
+name = "arbitrage-telegram-alarm-bot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "bs4>=0.0.2",
+    "pyjwt>=2.10.1",
+    "pytest-mock>=3.14.0",
+    "selenium>=4.27.0",
+]
