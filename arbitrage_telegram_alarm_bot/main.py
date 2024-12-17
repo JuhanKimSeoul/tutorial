@@ -37,6 +37,9 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 import sqlite3
 import copy
+from cachetools import TTLCache
+
+cache = TTLCache(maxsize=100, ttl=300)
 
 load_dotenv('dev.env')
 
@@ -66,6 +69,21 @@ logging.basicConfig(
 
 # Create a logger object
 logger = logging.getLogger(__name__)
+
+def ttl_cache(cache):
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            key = str(args) + str(kwargs)
+            if key in cache:
+                logger.debug(f"Cache hit for key: {key}")
+                return cache[key]
+            logger.debug(f"Cache miss for key: {key}")
+            result = await func(*args, **kwargs)
+            cache[key] = result
+            return result
+        return wrapper
+    return decorator
 
 class ExchangeAPIConfig(ABC):
     """A base class to store API-specific configurations for each exchange."""
@@ -98,7 +116,7 @@ class UpbitAPIConfig(ExchangeAPIConfig):
         elif url == self.kline_url:
             return {
                 'market': kwargs.get('symbol'),
-                'count': self.limit
+                'count': kwargs.get('limit', self.limit)
             }
         elif url == self.all_tickers_url:
             return {
@@ -170,7 +188,7 @@ class BithumbAPIConfig(ExchangeAPIConfig):
         elif url == self.kline_url:
             return {
                 'market': kwargs.get('symbol'),
-                'count': self.limit
+                'count': kwargs.get('limit', self.limit)
             }
         elif url == self.all_tickers_url:
             return {
@@ -231,6 +249,7 @@ class BybitAPIConfig(ExchangeAPIConfig):
     leverage_set_url    = "/v5/position/set-leverage"
     ticker_info_url     = "/v5/market/instruments-info?category=linear"
     position_info_url   = "/v5/position/list"
+    recent_trade_url    = "/v5/market/recent-trade"
     interval_enum       = [1,3,5,15,30,60,120,240,360,720,'D','W','M']
     orderbook_limit     = 500
     kline_limit         = 1000
@@ -261,7 +280,7 @@ class BybitAPIConfig(ExchangeAPIConfig):
                 'category' : 'linear',
                 'symbol': kwargs.get('symbol'),
                 'interval': interval,
-                'limit': self.kline_limit
+                'limit': kwargs.get('limit', self.kline_limit)
             }
         elif url == self.all_tickers_url:
             return {
@@ -304,6 +323,7 @@ class BinanceAPIConfig(ExchangeAPIConfig):
     leverage_set_url    = '/fapi/v1/leverage'
     ticker_info_url     = '/fapi/v1/exchangeInfo'
     position_info_url   = '/fapi/v3/positionRisk'
+    recent_trade_url    = '/fapi/v1/trades'
     interval_enum       = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w', '1M']
     orderbook_limit     = 1000
     fee_rate            = Fees.BINANCE.value
@@ -349,7 +369,6 @@ class BinanceAPIConfig(ExchangeAPIConfig):
             return {}
         elif url == self.position_info_url:
             return {
-                'symbol': kwargs.get('symbol'),
                 'recvWindow': kwargs.get('recvWindow', 5000),
                 'timestamp': round(time.time() * 1000)
             }
@@ -369,29 +388,36 @@ class ExchangeManager(ABC):
     def ticker_mapper(self, symbol):
         pass
         
-    async def request(self, method, endpoint, headers: dict = None, params: dict = None, contentType: str = 'json'):
+    async def request(self, method, endpoint, headers: dict = None, params: dict = None, contentType: str = 'json', retries: int = 3):
         try:
             async with aiohttp.ClientSession() as session:
                 if method == 'get':
                     async with session.get(self.config.server_url + endpoint, params=params, headers=headers) as response:
                         if response.status == 429:
                             await self.handle_rate_limit(response)
+                            return await self.request(method, endpoint, headers, params, contentType)  # Retry the request
                         return await response.json()
                 elif method == 'post':
                     if contentType != 'json':
                         async with session.post(self.config.server_url + endpoint, data=params, headers=headers) as response:
                             if response.status == 429:
                                 await self.handle_rate_limit(response)
+                                return await self.request(method, endpoint, headers, params, contentType)  # Retry the request
                             return await response.json()
                     else:
                         async with session.post(self.config.server_url + endpoint, json=params, headers=headers) as response:
                             if response.status == 429:
                                 await self.handle_rate_limit(response)
+                                return await self.request(method, endpoint, headers, params, contentType)  # Retry the request
                             return await response.json()
                 elif method == 'delete':
                     pass
         except aiohttp.ClientConnectionError as e:
             logger.error(f'Connection error: {e}')
+            if retries > 0:
+                logger.info(f'Retrying... ({retries} retries left)')
+                await asyncio.sleep(1)  # Wait before retrying
+                return await self.request(method, endpoint, headers, params, contentType, retries - 1)
         except asyncio.TimeoutError:
             logger.error('Request timed out')
         except Exception as e:
@@ -405,6 +431,7 @@ class ExchangeManager(ABC):
             await asyncio.sleep(int(retry_after))
         else:
             logger.error("Rate limit exceeded, but no 'Retry-After' header found.")
+            await asyncio.sleep(1)
 
     async def get_ticker_withdraw_info(self):
         pass
@@ -434,8 +461,18 @@ class ExchangeManager(ABC):
         pass
 
     @abstractmethod
-    async def post_order(self):
+    async def post_order(self, PositionEntryIn: PositionEntryIn):
         pass
+
+    def interval_to_second(self, interval:str):
+        if interval[-1] == 'm':
+            return int(interval[:-1]) * 60
+        elif interval[-1] == 'h':
+            return int(interval[:-1]) * 3600
+        elif interval[-1] == 'd':
+            return int(interval[:-1]) * 86400
+        elif interval[-1] == 'w':
+            return int(interval[:-1]) * 604800
 
 class UpbitManager(ExchangeManager):
     def __init__(self):
@@ -477,6 +514,10 @@ class UpbitManager(ExchangeManager):
 
         return await self.request('get', endpoint, headers, params)
 
+    @ttl_cache(cache)
+    async def get_cached_single_ticker_price(self, symbol):
+        return await self.get_single_ticker_price(symbol)
+
     async def get_balance(self, symbol):
         payload = {
             'access_key': upbit_access_key,
@@ -493,9 +534,9 @@ class UpbitManager(ExchangeManager):
         logger.info(res)
         return float([ i.get('balance', 0) for i in res if i.get('currency') == symbol][0])
 
-    async def get_kline(self, symbol, interval):
+    async def get_kline(self, symbol, interval, limit: int = 200):
         endpoint = self.config.get_kline_endpoint(interval)
-        params = self.config.get_params(self.config.kline_url, symbol=self.ticker_mapper(symbol))
+        params = self.config.get_params(self.config.kline_url, symbol=self.ticker_mapper(symbol), limit=limit)
         headers = {"accept" : "application/json"}
 
         return await self.request('get', endpoint, headers, params)
@@ -507,7 +548,7 @@ class UpbitManager(ExchangeManager):
 
         return await self.request('get', endpoint, headers, params)
 
-    async def post_order(self, market, side, price, volume, ord_type):
+    async def post_order(self, PositionEntryIn: PositionEntryIn):
         '''
             시장가 매수시 params ex)
                 {
@@ -525,12 +566,7 @@ class UpbitManager(ExchangeManager):
                 }
         '''
         endpoint = self.config.order_url
-        params = self.config.get_params(endpoint, market=self.ticker_mapper(market), side=side, price=price, volume=volume, ord_type=ord_type)
-
-        if side == 'bid':
-            params.pop('volume')
-        elif side == 'ask':
-            params.pop('price')
+        params = PositionEntryMapper.to_exchange(PositionEntryIn, self.config.name).not_None_to_dict()
 
         query_string = unquote(urlencode(params, doseq=True)).encode("utf-8")
 
@@ -645,7 +681,34 @@ class UpbitManager(ExchangeManager):
         df = pd.DataFrame(data, columns=['market', 'network', 'status'])
         return df if market is None else df[df['market'] == market]
 
-    async def get_trade_strength(self, symbol: str, window: int = 1000) -> float:
+    async def get_trade_data(self, symbol, window: int = 1000, interval: str = '1m')->list:
+        try:
+            # Get recent trades from Upbit
+            trades = await self.request(
+                'get',
+                f'/v1/trades/ticks?market=KRW-{symbol}&count={window}',
+                headers={"accept": "application/json"}
+            )
+
+            if not trades:
+                return None
+
+            # filter trade data by interval
+            # data is in reverse chronological order
+            trades = [trade for trade in trades if trade['timestamp'] > trades[0]['timestamp'] - self.interval_to_second(interval) * 1000]
+            return {
+                'timestamp': [int(trade['timestamp']) for trade in trades],
+                'price': [float(trade['trade_price']) for trade in trades],
+                'volume': [float(trade['trade_volume']) for trade in trades],
+                'ask_bid': [trade['ask_bid'] for trade in trades]
+            }
+        
+        except Exception as e:
+            logger.error(f"Error calculating trade strength: {str(e)}")
+            logger.error(traceback.format_exc())
+            return None
+
+    async def get_trade_strength(self, symbol: str, window: int = 1000, interval: str = '1m') -> float:
         """
         Calculate trading strength (체결강도) for a given symbol
         체결강도 = (매수 체결량 / 매도 체결량) * 100
@@ -658,15 +721,7 @@ class UpbitManager(ExchangeManager):
             float: Trading strength percentage
         """
         try:
-            # Get recent trades from Upbit
-            trades = await self.request(
-                'get',
-                f'/v1/trades/ticks?market=KRW-{symbol}&count={window}',
-                headers={"accept": "application/json"}
-            )
-
-            if not trades:
-                return 0.0
+            trades = self.get_trade_data(symbol, window, interval)
 
             # Calculate buy and sell volumes
             buy_volume = sum(float(trade['trade_volume']) for trade in trades if trade['ask_bid'] == 'BID')
@@ -683,7 +738,70 @@ class UpbitManager(ExchangeManager):
             logger.error(f"Error calculating trade strength: {str(e)}")
             logger.error(traceback.format_exc())
             return 0.0
+
+    async def get_trade_volume(self, symbol: str, window: int = 1000, interval: str = '1m') -> float:
+        """
+        Calculate trading volume for a given symbol
+        체결량 = 매수 체결량 + 매도 체결량
         
+        Args:
+            symbol: Trading pair symbol (e.g. 'BTC')
+            window: Number of recent trades to analyze (default 100)
+        
+        Returns:
+            float: Trading volume
+        """
+        try:
+            trades = await self.get_trade_data(symbol, window, interval)
+            # Calculate total volume
+            return sum(float(trade['volume']) for trade in trades)
+
+        except Exception as e:
+            logger.error(f"Error calculating trade volume: {str(e)}")
+            logger.error(traceback.format_exc())
+            return 0.0
+        
+    async def get_quote_volume(self, symbol: str, window: int = 1000, interval: str = '1m', to: str = None) -> int:
+        """
+        Calculate trading volume for a given symbol
+        체결가격 * 체결량(매수체결량 + 매도체결량)
+        
+        Args:
+            symbol: Trading pair symbol (e.g. 'BTC')
+            window: Number of recent trades to analyze (default 100)
+        
+        Returns:
+            float: Trading quote volume
+        """
+        try:
+            trades = await self.get_trade_data(symbol, window, interval)
+            # Calculate total volume
+            return int(sum(float(trade['price']) * float(trade['volume']) for trade in trades))
+        
+        except Exception as e:
+            logger.error(f"Error calculating quote volume: {str(e)}")
+            logger.error(traceback.format_exc())
+            return 0
+
+    async def get_all_position_info(self):
+        payload = {
+            'access_key': upbit_access_key,
+            'nonce': str(uuid.uuid4()),
+        }
+
+        jwt_token = jwt.encode(payload, upbit_secret_key)
+        authorization = 'Bearer {}'.format(jwt_token)
+        headers = {
+            'Authorization': authorization,
+        }
+
+        res = await self.request('get', self.config.balance_url, headers)
+
+        return [{'symbol': item['currency'], \
+                 'side': 'bid', \
+                 'size': item['balance']} \
+                 for item in res]
+    
 class BithumbManager(ExchangeManager):
     def __init__(self):
         super().__init__()
@@ -741,12 +859,11 @@ class BithumbManager(ExchangeManager):
         }
 
         res = await self.request('get', self.config.balance_url, headers)
-        print(res)
         return float([ i.get('balance', 0) for i in res if i.get('currency') == symbol][0])
 
-    async def get_kline(self, symbol, interval):
+    async def get_kline(self, symbol, interval, limit: int = 200):
         endpoint = self.config.get_kline_endpoint(interval)
-        params = self.config.get_params(self.config.kline_url, symbol=self.ticker_mapper(symbol))
+        params = self.config.get_params(self.config.kline_url, symbol=self.ticker_mapper(symbol), limit=limit)
         headers = {"accept" : "application/json"}
 
         return await self.request('get', endpoint, headers, params)
@@ -758,7 +875,7 @@ class BithumbManager(ExchangeManager):
 
         return await self.request('get', endpoint, headers, params)
 
-    async def post_order(self, market, side, price, volume, ord_type):
+    async def post_order(self, PositionEntryIn: PositionEntryIn):
         '''
             시장가 매수시 params ex)
                 {
@@ -776,12 +893,7 @@ class BithumbManager(ExchangeManager):
                 }
         '''
         endpoint = self.config.order_url
-        params = self.config.get_params(endpoint, market=self.ticker_mapper(market), side=side, price=price, volume=volume, ord_type=ord_type)
-
-        if side == 'bid':
-            params.pop('volume')
-        elif side == 'ask':
-            params.pop('price')
+        params = PositionEntryMapper.to_exchange(PositionEntryIn, self.config.name).not_None_to_dict()
 
         # Generate access token
         query = urlencode(params).encode()
@@ -802,9 +914,7 @@ class BithumbManager(ExchangeManager):
             'Content-Type': 'application/json'
         }
 
-        logger.info(headers)
-
-        return await self.request('post', self.config.order_url, headers, params, 'x-www-form-urlencoded')
+        return await self.request('post', endpoint, headers, params, 'x-www-form-urlencoded')
 
     async def get_ticker_withdraw_info(self, currency, net_type):
         endpoint = self.config.withdraw_info_url
@@ -907,7 +1017,34 @@ class BithumbManager(ExchangeManager):
         df = pd.DataFrame(data, columns=['market', 'network', 'status'])
         return df if market is None else df[df['market'] == market]
     
-    async def get_trade_strength(self, symbol: str, window: int = 1000) -> float:
+    async def get_trade_data(self, symbol, window: int = 1000, interval: str = '1m')->list:
+        try:
+            # Get recent trades from Upbit
+            trades = await self.request(
+                'get',
+                f'/v1/trades/ticks?market=KRW-{symbol}&count={window}',
+                headers={"accept": "application/json"}
+            )
+
+            if not trades:
+                return None
+
+            # filter trade data by interval
+            # data is in reverse chronological order
+            trades = [trade for trade in trades if trade['timestamp'] > trades[0]['timestamp'] - self.interval_to_second(interval) * 1000]
+            return {
+                'timestamp': [int(trade['timestamp']) for trade in trades],
+                'price': [float(trade['trade_price']) for trade in trades],
+                'volume': [float(trade['trade_volume']) for trade in trades],
+                'ask_bid': [trade['ask_bid'] for trade in trades]
+            }
+        
+        except Exception as e:
+            logger.error(f"Error calculating trade strength: {str(e)}")
+            logger.error(traceback.format_exc())
+            return None
+
+    async def get_trade_strength(self, symbol: str, window: int = 1000, interval: str = '1m') -> float:
         """
         Calculate trading strength (체결강도) for a given symbol
         체결강도 = (매수 체결량 / 매도 체결량) * 100
@@ -920,15 +1057,7 @@ class BithumbManager(ExchangeManager):
             float: Trading strength percentage
         """
         try:
-            # Get recent trades from Upbit
-            trades = await self.request(
-                'get',
-                f'/v1/trades/ticks?market=KRW-{symbol}&count={window}',
-                headers={"accept": "application/json"}
-            )
-
-            if not trades:
-                return 0.0
+            trades = await self.get_trade_data(symbol, window, interval)
 
             # Calculate buy and sell volumes
             buy_volume = sum(float(trade['trade_volume']) for trade in trades if trade['ask_bid'] == 'BID')
@@ -946,6 +1075,69 @@ class BithumbManager(ExchangeManager):
             logger.error(traceback.format_exc())
             return 0.0
 
+    async def get_trade_volume(self, symbol:str, window: int = 1000, interval: str = '1m') -> float:
+        """
+        Calculate trading volume for a given symbol
+        체결량 = 매수 체결량 + 매도 체결량
+        
+        Args:
+            symbol: Trading pair symbol (e.g. 'BTC')
+            window: Number of recent trades to analyze (default 100)
+        
+        Returns:
+            float: Trading volume
+        """
+        try:
+            trades = await self.get_trade_data(symbol, window, interval)
+            # Calculate total volume
+            return sum(float(trade['trade_volume']) for trade in trades)
+
+        except Exception as e:
+            logger.error(f"Error calculating trade volume: {str(e)}")
+            logger.error(traceback.format_exc())
+            return 0.0
+
+    async def get_quote_volume(self, symbol: str, window: int = 1000, interval: str = '1m') -> int:  
+        """
+        Calculate trading volume for a given symbol
+        체결가격 * 체결량(매수체결량 + 매도체결량)
+        
+        Args:
+            symbol: Trading pair symbol (e.g. 'BTC')
+            window: Number of recent trades to analyze (default 100)
+        
+        Returns:
+            float: Trading quote volume
+        """
+        try:
+            trades = await self.get_trade_data(symbol, window, interval)
+            # Calculate total volume
+            return int(sum(float(trade['trade_price']) * float(trade['trade_volume']) for trade in trades))
+        
+        except Exception as e:
+            logger.error(f"Error calculating quote volume: {str(e)}")
+            logger.error(traceback.format_exc())
+            return 0
+
+    async def get_all_position_info(self):
+        payload = {
+            'access_key': bithumb_access_key,
+            'nonce': str(uuid.uuid4()),
+            'timestamp': round(time.time() * 1000)
+        }
+        jwt_token = jwt.encode(payload, bithumb_secret_key)
+        authorization_token = 'Bearer {}'.format(jwt_token)
+        headers = {
+            'Authorization': authorization_token
+        }
+
+        res = await self.request('get', self.config.balance_url, headers)
+
+        return [{'symbol': item['currency'], \
+                 'side': 'bid', \
+                 'size': item['balance']} \
+                 for item in res]
+    
 class BybitManager(ExchangeManager):
     def __init__(self):
         super().__init__()
@@ -1022,7 +1214,7 @@ class BybitManager(ExchangeManager):
             if res['retMsg'] == 'OK':
                 return res['result']['list'][0]['size']
 
-    async def post_order(self, category, symbol, side, orderType, qty:str):
+    async def post_order(self, PositionEntryIn: PositionEntryIn):
         '''
             시장가 매수시 params ex)
                 payload = {
@@ -1041,20 +1233,27 @@ class BybitManager(ExchangeManager):
                     "orderType": "Market",
                     "qty": "1",
                 }
-        '''
+
+            스탑로스 시장가 매수시 params ex)
+                payload = {
+                    "category": "linear",
+                    "symbol": "BTCUSDT",
+                    "side": "Buy",
+                    "orderType": "Market",
+                    "qty": "1",
+                    "tpslMode": "Full",
+                    "tpOrderType": "Market", # default
+                    "slOrderType": "Market", # default
+                    "slLimitPrice": "10000",
+                }
+        ''' 
+        endpoint = self.config.order_url
+        params: BybitPositionEntryIn = PositionEntryMapper.to_exchange(PositionEntryIn, self.config.name).not_None_to_dict()
 
         timestamp = str(int(time.time() * 1000))
         recv_window = "5000"
 
-        endpoint = self.config.order_url
-        payload = self.config.get_params(endpoint, \
-                                         category=category, \
-                                         symbol=self.ticker_mapper(symbol), \
-                                         side=side, \
-                                         orderType=orderType, \
-                                         qty=qty)
-
-        json_payload = json.dumps(payload)
+        json_payload = json.dumps(params)
         # Convert payload to JSON and create the pre-sign string
         param_str = f"{timestamp}{bybit_access_key}{recv_window}{json_payload}"
 
@@ -1115,16 +1314,14 @@ class BybitManager(ExchangeManager):
             return True
         return False
 
-    async def get_kline(self, symbol, interval):
+    async def get_kline(self, symbol, interval, limit: int = 1000):
         endpoint = self.config.kline_url
-        params = self.config.get_params(endpoint, symbol=self.ticker_mapper(symbol), interval=interval)
+        params = self.config.get_params(endpoint, symbol=self.ticker_mapper(symbol), interval=interval, limit=limit)
         headers = {"accept" : "application/json"}
 
         res = await self.request('get', endpoint, headers, params)
         if not res['result'].get('list', False):
-            print(params)
-            print(res)
-            
+            raise ValueError(f"{__class__} {__name__} Symbol {symbol} not found")
         return res['result']['list']
 
     async def get_orderbook(self, symbol):
@@ -1179,6 +1376,98 @@ class BybitManager(ExchangeManager):
             logger.error(f"Error getting numeric tickers: {str(e)}")
             return []
     
+    async def get_all_position_info(self):
+        timestamp = str(int(time.time() * 1000))
+        recv_window = '5000'
+
+        params = {
+            'category': 'linear',
+            'settleCoin': 'USDT'
+        }
+
+        endpoint = self.config.position_info_url
+
+        param_str = '&'.join(f'{key}={value}' for key, value in params.items())
+        pre_sign = f'{timestamp}{bybit_access_key}{recv_window}{param_str}'
+
+        signature = hmac.new(
+            bybit_secret_key.encode('utf-8'),
+            pre_sign.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        headers = {
+            'X-BAPI-API-KEY': bybit_access_key,
+            'X-BAPI-SIGN': signature,
+            'X-BAPI-TIMESTAMP': timestamp,
+            'X-BAPI-RECV-WINDOW': recv_window
+        }
+
+        raw_res = await self.request('get', endpoint, headers, params)
+
+        return [{'symbol': item['symbol'], \
+                 'side': 'bid' if item['side'] == 'Buy' else 'ask', \
+                 'size': item['size'], \
+                 'unrealisedPnl': item['unrealisedPnl']} \
+                 for item in raw_res.get('result', {}).get('list', [])]
+
+    async def get_quote_volume(self, symbol: str, window: int = 1000, interval: str = '1m') -> int:
+        """
+        Calculate trading volume for a given symbol
+        체결가격 * 체결량(매수체결량 + 매도체결량)
+        
+        Args:
+            symbol: Trading pair symbol (e.g. 'BTC')
+            window: Number of recent trades to analyze (default 100)
+        
+        Returns:
+            float: Trading quote volume
+        """
+        try:
+            trades = await self.get_trade_data(symbol, window, interval)
+            # Calculate total volume
+            return int(sum(float(trade['price']) * float(trade['size']) for trade in trades))
+        
+        except Exception as e:
+            logger.error(f"Error calculating quote volume: {str(e)}")
+            logger.error(traceback.format_exc())
+            return 0
+
+    async def get_trade_data(self, symbol, window: int = 1000, interval: str = '1m')->list:
+        try:
+            endpoint = self.config.recent_trade_url
+            params = {
+                'category': 'linear',
+                'symbol': self.ticker_mapper(symbol),
+                'limit': window
+            }
+            # Get recent trades from Bybit
+            trades = await self.request(
+                'get',
+                endpoint,
+                headers={"accept": "application/json"},
+                params=params
+            )
+
+            if not trades.get('result'):
+                return 0
+
+            trades = trades['result']['list']
+
+            # filter trade data by interval
+            # data is in reverse chronological order
+            trades = [trade for trade in trades if int(trade['time']) > int(trades[0]['time']) - self.interval_to_second(interval) * 1000]
+            return {
+                'timestamp': [int(trade['time']) for trade in trades],
+                'price': [float(trade['price']) for trade in trades],
+                'volume': [float(trade['size']) for trade in trades],
+            }
+        
+        except Exception as e:
+            logger.error(f"Error calculating trade strength: {str(e)}")
+            logger.error(traceback.format_exc())
+            return None
+
 class BinanceManager(ExchangeManager):
     def __init__(self):
         super().__init__()
@@ -1257,9 +1546,9 @@ class BinanceManager(ExchangeManager):
                     return position['positionAmt']
             return 0
     
-    async def get_kline(self, symbol, interval):
+    async def get_kline(self, symbol, interval, limit: int = 1000):
         endpoint = self.config.kline_url
-        params = self.config.get_params(endpoint, symbol=self.ticker_mapper(symbol), interval=interval)
+        params = self.config.get_params(endpoint, symbol=self.ticker_mapper(symbol), interval=interval, limit=limit)
         headers = {"accept": "application/json"}
 
         return await self.request('get', endpoint, headers, params)
@@ -1271,17 +1560,10 @@ class BinanceManager(ExchangeManager):
 
         return await self.request('get', endpoint, headers, params)
 
-    async def post_order(self, symbol, side, order_type, positionSide, quantity, price=None):
+    async def post_order(self, PositionEntryIn: PositionEntryIn):
         endpoint = self.config.order_url
-        params = self.config.get_params(endpoint, \
-                                        symbol=self.ticker_mapper(symbol), \
-                                        side=side, \
-                                        order_type=order_type, \
-                                        quantity=quantity, \
-                                        positionSide=positionSide, \
-                                        price=price)
-        if price:
-            params['price'] = price
+        params = PositionEntryMapper.to_exchange(PositionEntryIn, self.config.name).not_None_to_dict()
+        params['timestamp'] = int(time.time() * 1000)
 
         query_string = urlencode(params)
         signature = hmac.new(
@@ -1345,9 +1627,17 @@ class BinanceManager(ExchangeManager):
         params['signature'] = signature
         headers = {
             'X-MBX-APIKEY': binance_access_key,
+            'Content-Type': 'application/x-www-form-urlencoded'
         }
 
-        return await self.request('get', endpoint, headers, params)
+        raw_res = await self.request('get', endpoint, headers, params)
+        logger.info(f'Position info: {raw_res}')
+
+        return [{'symbol': item['symbol'], \
+                 'side': 'bid' if item['positionSide'] == 'LONG' else 'ask', \
+                 'size': item['positionAmt'], \
+                 'unrealisedPnl': item['unRealizedProfit']} \
+                 for item in raw_res]
     
     async def get_numeric_tickers(self):
         """Get Binance tickers containing numbers"""
@@ -1370,6 +1660,60 @@ class BinanceManager(ExchangeManager):
         except Exception as e:
             logger.error(f"Error getting numeric tickers: {str(e)}")
             return []
+
+    async def get_quote_volume(self, symbol: str, window: int = 1000, interval: str = '1m') -> int:
+        """
+        Calculate trading volume for a given symbol
+        체결가격 * 체결량(매수체결량 + 매도체결량)
+        
+        Args:
+            symbol: Trading pair symbol (e.g. 'BTC')
+            window: Number of recent trades to analyze (default 100)
+        
+        Returns:
+            float: Trading quote volume
+        """
+        try:
+            trades = await self.get_trade_data(symbol, window, interval)
+            # Calculate total volume
+            return int(sum(float(trade['price']) * float(trade['qty']) for trade in trades))
+        
+        except Exception as e:
+            logger.error(f"Error calculating quote volume: {str(e)}")
+            logger.error(traceback.format_exc())
+            return 0
+
+    async def get_trade_data(self, symbol, window: int = 1000, interval: str = '1m')->list:
+        try:
+            endpoint = self.config.recent_trade_url
+            params = {
+                'symbol': self.ticker_mapper(symbol),
+                'limit': window
+            }
+            # Get recent trades from Binance
+            trades = await self.request(
+                'get',
+                endpoint,
+                headers={"accept": "application/json"},
+                params=params
+            )
+
+            if not trades:
+                return 0
+
+            # filter trade data by interval
+            # data is in reverse chronological order
+            trades = [trade for trade in trades if trade['time'] > trades[0]['time'] - self.interval_to_second(interval) * 1000]
+            return {
+                'timestamp': [int(trade['time']) for trade in trades],
+                'price': [float(trade['price']) for trade in trades],
+                'volume': [float(trade['qty']) for trade in trades],
+            }
+        
+        except Exception as e:
+            logger.error(f"Error calculating trade strength: {str(e)}")
+            logger.error(traceback.format_exc())
+            return None
 
 def truncate_number(a, b)->str:
     """
@@ -1402,6 +1746,7 @@ class KimpManager:
         }
         self.depwith_status_cache = None
         self.depwith_last_cache_time = 0
+        self.usdt_price_last_cache_time = 0
 
     def get_exchange_manager(self, ex):
         return self.managers.get(ex)
@@ -1860,6 +2205,165 @@ class KimpManager:
             await update.message.reply_text(f"```\n{df2.tail(10).to_string()}\n```", parse_mode='Markdown')
             await asyncio.sleep(10)
 
+    @ttl_cache(cache)
+    async def get_all_tickers(self):
+        tasks = [self.get_exchange_manager(ex).get_all_ticker_price() for ex in self.ex_lists]
+        results = await asyncio.gather(*tasks)
+
+        # Process the results
+        upbit_data = [ i.get('market').split('-')[1] for i in results[0] if i.get('market').startswith('KRW-')]
+        bithumb_data = [ i.get('market').split('-')[1] for i in results[1] if i.get('market').startswith('KRW-')]
+        bybit_data = [ i.get('symbol')[ : i.get('symbol').find('USDT')] for i in results[2]['result']['list'] if i.get('symbol').endswith('USDT')]
+        binance_data = [ i.get('symbol')[ : i.get('symbol').find('USDT')] for i in results[3] if i.get('symbol').endswith('USDT')]
+        
+        return {
+            'upbit': upbit_data,
+            'bithumb': bithumb_data,
+            'bybit': bybit_data,
+            'binance': binance_data
+        }
+
+    async def run_big_volume_alarm(self, update, context):
+        event_caller = context.user_data['event_caller']
+        volume_multiplier = context.user_data[event_caller]['multiplier']
+        
+        try:
+            upbit_target_tickers = []
+            bithumb_target_tickers = []
+            bybit_target_tickers = []
+            binance_target_tickers = []
+
+            batch_size = 5
+            i, j, p, q = 0, 0, 0, 0
+            start_time = time.time()
+            while not context.user_data['stop_event'].is_set():
+                
+                # USDT 가격 구하기 - 캐시사용
+                usdt_price = (await self.get_exchange_manager('upbit').get_cached_single_ticker_price('USDT'))[0]['trade_price']
+
+                # 모든 거래소의 티커 가져오기 - 캐시사용
+                res = await self.get_all_tickers()
+                upbit_tickers = res['upbit']
+                bithumb_tickers = res['bithumb']
+                bybit_tickers = res['bybit']
+                binance_tickers = res['binance']
+
+                tickers_data = []
+                if upbit_tickers[i:i+batch_size]:
+                    tickers_data += [('upbit', ticker) for ticker in upbit_tickers[i:i+batch_size]]
+
+                if bithumb_tickers[j:j+batch_size]:
+                    tickers_data += [('bithumb', ticker) for ticker in bithumb_tickers[j:j+batch_size]]
+
+                if bybit_tickers[p:p+batch_size]:
+                    tickers_data += [('bybit', ticker) for ticker in bybit_tickers[p:p+batch_size]]
+
+                if binance_tickers[q:q+batch_size]:
+                    tickers_data += [('binance', ticker) for ticker in binance_tickers[q:q+batch_size]]
+
+                tasks = [self.get_exchange_manager(ex).get_kline(ticker, interval='1m', limit=2) for ex, ticker in tickers_data]
+
+                results = await asyncio.gather(*tasks)
+
+                for ticker, res in zip(tickers_data, results):
+                    if ticker[0] in ['upbit', 'bithumb']:
+                        df = pd.DataFrame(res)
+                        df.rename(columns={'candle_acc_trade_price': 'quote_volume', 'candle_date_time_kst': 'datetime'}, inplace=True)
+                        df['timestamp'] = pd.to_datetime(df.datetime)
+                        now_candle_timestamp = df.iloc[0].timestamp
+
+                    elif ticker[0] in ['bybit', 'binance']:
+                        df = pd.DataFrame(res, columns=ex_kline_col_map[ticker[0]])
+                        df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
+                        df['timestamp'] = pd.to_datetime(df.timestamp, unit='ms')
+                        df.timestamp = df.timestamp.dt.tz_localize('UTC').dt.tz_convert('Asia/Seoul')
+                        now_candle_timestamp = df.iloc[0].timestamp
+
+                    if ticker[0] != 'binance':
+                        now_candle_quote_volume = int(float(df.iloc[0].quote_volume))
+                        bef_candle_quote_volume = int(float(df.iloc[1].quote_volume))
+                    else: # binance는 시간역순으로 데이터를 준다.
+                        now_candle_quote_volume = int(float(df.iloc[1].quote_volume))
+                        bef_candle_quote_volume = int(float(df.iloc[0].quote_volume))
+                    
+                    # 1차 필터링 : 거래량이 0인 경우
+                    if now_candle_quote_volume == 0 or bef_candle_quote_volume == 0:
+                        continue
+
+                    # 2차 필터링 : 직전 1분간 거래량이 2분간 거래량 * volume_multiplier 보다 작은 경우
+                    if now_candle_quote_volume < bef_candle_quote_volume * volume_multiplier:
+                        continue
+
+                    # 3차 필터링
+                    if ticker[0] == 'upbit' and now_candle_quote_volume > 100_000_000:
+                        upbit_target_tickers.append((ticker[1], now_candle_timestamp, now_candle_quote_volume))
+                    elif ticker[0] == 'bithumb' and now_candle_quote_volume > 100_000_000:
+                        bithumb_target_tickers.append((ticker[1], now_candle_timestamp, now_candle_quote_volume))
+                    elif ticker[0] == 'bybit' and now_candle_quote_volume * usdt_price > 100_000_000:
+                        bybit_target_tickers.append((ticker[1], now_candle_timestamp, int(now_candle_quote_volume * usdt_price)))
+                    elif ticker[0] == 'binance' and now_candle_quote_volume * usdt_price > 500_000_000:
+                        binance_target_tickers.append((ticker[1], now_candle_timestamp, int(now_candle_quote_volume * usdt_price)))
+
+                i += batch_size
+                j += batch_size 
+                p += batch_size
+                q += batch_size
+
+                if i >= len(upbit_tickers):
+                    if upbit_target_tickers:
+                        messages = ""
+                        for ticker, timestamp, res in upbit_target_tickers:
+                            messages += f"upbit [{timestamp}] {ticker}거래량 : {res:,}\n"
+                        await update.message.reply_text(messages)
+
+                    upbit_target_tickers.clear()
+                    i = 0
+
+                if j >= len(bithumb_tickers):
+                    if bithumb_target_tickers:
+                        messages = ""
+                        for ticker, timestamp, res in bithumb_target_tickers:
+                            messages += f"bithumb [{timestamp}] {ticker}거래량 : {res:,}\n"
+                        await update.message.reply_text(messages)
+
+                    bithumb_target_tickers.clear()
+                    j = 0
+
+                if p >= len(bybit_tickers):
+                    if bybit_target_tickers:
+                        messages = ""
+                        for ticker, timestamp, res in bybit_target_tickers:
+                            messages += f"bybit [{timestamp}] {ticker}거래량 : {res:,}\n"
+                        await update.message.reply_text(messages)
+
+                    bybit_target_tickers.clear()
+                    p = 0
+
+                if q >= len(binance_tickers):
+                    logger.info(f'elapsed time : {time.time() - start_time}')
+                    if binance_target_tickers:
+                        messages = ""
+                        for ticker, timestamp, res in binance_target_tickers:
+                            messages += f"binance [{timestamp}] {ticker}거래량 : {res:,}\n"
+                        await update.message.reply_text(messages)
+
+                    binance_target_tickers.clear()
+                    q = 0
+
+                await asyncio.sleep(0.3)
+
+        except Exception as e:
+            logger.error(f"Error in run_big_volume_alarm")
+            logger.error(traceback.format_exc())
+        
+        finally:
+            self.usdt_price_last_cache_time = None
+            del context.user_data[event_caller]
+            del context.user_data['event_caller']
+            del context.user_data['stop_event']
+            del context.user_data['task']
+            return ConversationHandler.END
+
     async def run_kimp_alarm(self, update, context):
         """Monitor exchange rates and send Telegram alerts with trading strength"""
         event_caller = context.user_data['event_caller']
@@ -1870,8 +2374,6 @@ class KimpManager:
         upbit = self.get_exchange_manager('upbit')
         try:
             while not context.user_data['stop_event'].is_set():
-                await update.message.reply_text("🔔 환율 모니터링을 시작합니다...")
-
                 # Get current USDT price
                 usdt_price = (await upbit.get_single_ticker_price('USDT'))[0]['trade_price']
                 
@@ -1905,7 +2407,7 @@ class KimpManager:
                     for (for_ex, krw_ex), row in df1.groupby(level=['for_ex', 'krw_ex']):
                         exchange = self.get_exchange_manager(krw_ex)
                         for market in row['market']:
-                            strength_tasks.append(exchange.get_trade_strength(market))
+                            strength_tasks.append(exchange.get_trade_strength(market, interval='1m'))
 
                     # Execute all tasks concurrently
                     strengths = await asyncio.gather(*strength_tasks)
@@ -1949,13 +2451,6 @@ class KimpManager:
                                                         f"🔔 체결 강도 >= 100\n"
                                                         f"🔔 입출금 가능 티커만\n"
                                                         f"\n{filtered_df.to_string()}\n")
-                        # await self.send_telegram(
-                        #     f"🔔 테더 가격: {usdt_price:.2f}\n"
-                        #     f"🔔 현재 환율 >= {up_threshold:.0f}\n"
-                        #     f"🔔 입출금 가능 티커만\n"
-                        #     f"🔔 체결 강도 >= 100\n"
-                        #     f"\n{filtered_df.to_string()}\n"
-                        # )
 
                 if not df2.empty:
                     # Dictionary to store real exrates
@@ -2004,17 +2499,18 @@ class KimpManager:
                         await update.message.reply_text(f"🔔 테더 가격: {usdt_price:.2f}\n"
                                                         f"🔔 현재 환율 <= {down_threshold:.0f}\n"
                                                         f"\n{df2.to_string()}\n")
-                        # await self.send_telegram(
-                        #     f"🔔 테더 가격: {usdt_price:.2f}\n"
-                        #     f"🔔 현재 환율 <= {down_threshold:.2f}\n"
-                        #     f"\n{df2.to_string()}\n"
-                        # )
 
                 await asyncio.sleep(10)
                 
         except Exception as e:
             logger.error(f"Error in kimp_alarm: {str(e)}")
             logger.error(traceback.format_exc())
+            await update.message.reply_text(f"Error in kimp_alarm: {str(e)}")
+        finally:
+            del context.user_data[event_caller]
+            del context.user_data['event_caller']
+            del context.user_data['stop_event']
+            del context.user_data['task']
 
     async def get_exrate_kline_dataframe(self, symbol, interval, krw_ex, for_ex):
         krw_ex_manager = self.get_exchange_manager(krw_ex)
@@ -2030,30 +2526,6 @@ class KimpManager:
         tether_task = krw_ex_manager.get_kline('USDT', interval)
 
         krw_raw_data, usdt_raw_data, tether_raw_data = await asyncio.gather(krw_task, usdt_task, tether_task)
-
-        ex_col_map = {
-            'upbit' : ['opening_price', 'high_price', 'low_price', 'trade_price', 'candle_acc_trade_volume', 'candle_acc_trade_price'],
-            'bithumb' : ['opening_price', 'high_price', 'low_price', 'trade_price', 'candle_acc_trade_volume', 'candle_acc_trade_price'],
-            'coinone' : ['open', 'high', 'low', 'close', 'target_volume', 'quote_volume'],
-            'korbit' : ['open', 'high', 'low', 'close', 'volume'],
-            'bybit' : ['timestamp', 'open', 'high', 'low', 'close', 'target_volume', 'quote_volume'],
-            'bitget' : ['timestamp', 'open', 'high', 'low', 'close', 'target_volume', 'close_time', 'quote_volume', 'Number_of_trades', 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'],
-            'binance' : ['timestamp', 'open', 'high', 'low', 'close', 'target_volume', 'quote_volume'],
-            'okx' : ['timestamp', 'open', 'high', 'low', 'close', 'confirm'],
-            'gateio' : ['t', 'v', 'c', 'h', 'l', 'o', 'sum']
-        }
-
-        ex_datetime_col_map = {
-            'upbit' : 'candle_date_time_kst',
-            'bithumb' : 'candle_date_time_kst',
-            'coinone' : 'timestamp',
-            'korbit' : 'timestamp',
-            'bybit' : 'timestamp',
-            'bitget' : 'timestamp',
-            'binance' : 'timestamp',
-            'okx' : 'timestamp',
-            'gateio' : 't'
-        }
 
         cols_to_convert = ['datetime', 'open', 'high', 'low', 'close', 'target_volume', 'quote_volume']
 
@@ -2126,8 +2598,10 @@ class KimpManager:
 
         return merged_df[['datetime', 'close_x', 'close_y', 'exrate', 'kimp', 'usdt_close']]
 
-    async def get_tickers_by_sub_indicators(self, update, interval:str):
+    async def get_tickers_by_sub_indicators(self, update, context):
         """Find tickers with price above weekly Bollinger Band middle line"""
+        event_caller = context.user_data['event_caller']
+        interval = context.user_data[event_caller]['interval']
         try:
             tasks = [self.get_exchange_manager(ex).get_all_ticker_price() for ex in self.ex_lists]
             results = await asyncio.gather(*tasks)
@@ -2145,6 +2619,8 @@ class KimpManager:
 
         from itertools import groupby
         from operator import itemgetter
+
+
 
         # Combine and deduplicate by market
         all_data = upbit_data + bithumb_data + bybit_data + binance_data
@@ -2330,8 +2806,11 @@ class KimpManager:
         except Exception as e:
             logger.error(f"Error in get_tickers_by_sub_indicators: {str(e)}")
             logger.error(traceback.format_exc())
-
-        
+            await update.callback_query.message.reply_text(f"Error in get_tickers_by_sub_indicators: {str(e)}")
+        finally:
+            del context.user_data[event_caller]
+            del context.user_data['event_caller']
+            del context.user_data['task']
 
     def plot_img(self, data:list, title, xlabel, ylabel, twinx_yn=False):
         '''
@@ -2514,7 +2993,233 @@ class KimpManager:
                               \n is_buy : {is_buy} \
                               \n fee_rate : {fee_rate}')
         
+    async def run_future_auto_trading(self, update, context):
+        event_caller = context.user_data['event_caller']
+        symbol = context.user_data[event_caller]['symbol']
+        budget = context.user_data[event_caller]['budget']
+        leverage = context.user_data[event_caller]['leverage']
+        stop_loss = context.user_data[event_caller]['stop_loss']
+        strategy = context.user_data[event_caller]['strategy']
+        for_ex = context.user_data[event_caller]['for_ex']
+        interval = context.user_data[event_caller]['interval']
 
+        if strategy == 'bb':
+            bb_strategy = BollingerBandStrategy({
+                'symbol' : symbol,
+                'budget' : budget,
+                'leverage' : leverage,
+                'stop_loss' : stop_loss,
+                'for_ex' : for_ex,
+                'interval' : interval, 
+                'kline_data' : df, 
+                'context' : context
+            })
+            bb_strategy.run()
+        
+        elif strategy == 'rsi':
+            pass
+
+class TradingDataManager:
+    def __init__(self, ex):
+        self.ex_name = ex
+        self.ex = globals()[f'{ex.capitalize()}Manager']()
+
+    async def get_kline_data(self, symbol, interval)->pd.DataFrame:
+        kline_raw_data = await self.ex.get_kline(symbol, interval)
+        df = pd.DataFrame(kline_raw_data, columns=KLINE_RESPONSE_MAP[self.ex_name])
+
+        if self.ex_name == 'gateio':
+            df.rename(columns={'t' : 'timestamp', 'o' : 'open', 'h' : 'high', 'l' : 'low', 'c' : 'close', 'v' : 'target_volume', 'sum' : 'quote_volume'}, inplace=True)
+
+        filtered_cols = ['timestamp', 'open', 'high', 'low', 'close', 'target_volume', 'quote_volume']
+
+        if self.ex_name == 'okx':
+            filtered_cols = ['timestamp', 'open', 'high', 'low', 'close']
+        
+        df = df[filtered_cols]
+
+        if self.ex_name == 'gateio':
+            df['datetime'] = pd.to_datetime(df.timestamp, unit='s')
+        else:
+            df['datetime'] = pd.to_datetime(df.timestamp, unit='ms')
+
+        df.datetime = df.datetime.dt.tz_localize('UTC').dt.tz_convert('Asia/Seoul')
+        df[filtered_cols].apply(pd.to_numeric, inplace=True)
+        df.sort_values('timestamp', inplace=True)
+
+        return df
+
+    async def get_position(self)->dict:
+        res_list = await self.ex.get_all_positions()
+        for item in res_list:
+            if item['symbol'] == self.symbol:
+                return item
+        return None
+
+    async def get_balance(self):
+        if self.ex_name in ['upbit', 'bithumb']:
+            return await self.ex.get_balance('KRW')
+        return await self.ex.get_balance('USDT')
+    
+class TradingBroker:
+    def __init__(self, ex):
+        self.ex_name = ex
+        self.ex = globals()[f'{ex.capitalize()}Manager']()
+
+    async def position_entry(self, PositionEntryIn: PositionEntryIn):
+        params = PositionEntryIn.to_exchange(PositionEntryIn, self.ex_name)
+        res = await self.ex.post_order(params)
+
+        if self.ex_name == 'bybit':
+            res = await self.ex.post_order(params)
+            if res.get('ret_msg') == 'ok':
+                return res
+            raise ValueError(res)
+        
+        elif self.ex_name == 'binance':
+            res = await self.ex.post_order(params)
+            if res.get('status') == 'NEW':
+                return res
+            raise ValueError(res)
+        
+        elif self.ex_name == 'upbit':
+            res = await self.ex.post_order(params)
+            if res.get('uuid'):
+                return res
+            raise ValueError(res)
+        
+        elif self.ex_name == 'bithumb':
+            res = await self.ex.post_order(params)
+            if res.get('uuid'):
+                return res
+            raise ValueError(res)
+    
+        return ValueError('Invalid exchange name')
+    
+class AutoTradingStrategies(ABC):
+    def init(self, *args, **kwargs):
+        self.symbol = kwargs.get('symbol')
+        self.ex = kwargs.get('ex')
+        self.budget = 'all' if kwargs.get('budget') == 'all' else kwargs.get('budget')
+        self.pyramiding = kwargs.get('pyramiding')
+        self.entry_cnt = 0
+        self.leverage = kwargs.get('leverage')
+        self.stop_loss = kwargs.get('stop_loss')
+        self.interval = kwargs.get('interval')
+        self.kline_data = kwargs.get('kline_data')
+        self.context = kwargs.get('context')
+        self.update = kwargs.get('update')
+
+    @abstractmethod
+    def run(self, *args, **kwargs):
+        pass
+    
+    async def position_entry(self, signal):
+        tdMgr = TradingDataManager(self.for_ex)
+        position = await tdMgr.get_position()
+
+        if self.budget == 'all':
+            self.budget = await tdMgr.get_balance()
+
+        if signal == 'bid':
+            if position:
+                # check the position side
+                if position['side'] == 'bid':
+                    logger.info(f"Already in a long position for {self.symbol}")
+                    return False
+                else:
+                    t = TradingBroker(self.ex)
+                    res = await t.position_entry(PositionEntryIn(symbol=self.symbol, side='ask', order_type='market', qty=position['size']))
+                    logger.info(res)
+
+                    if self.budget == 'all':
+                        self.budget = await tdMgr.get_balance()
+
+                    res = await t.position_entry(PositionEntryIn(symbol=self.symbol, side='bid', order_type='market', qty=self.budget))
+                    logger.info(res)
+            else:
+                res = await TradingBroker(self.ex).position_entry(PositionEntryIn(symbol=self.symbol, side='bid', order_type='market', qty=self.budget))
+                logger.info(res)
+
+        elif signal == 'ask':
+            if position:
+                # check the position side
+                if position['side'] == 'ask':
+                    logger.info(f"Already in a short position for {self.symbol}")
+                    return False
+                else:
+                    t = TradingBroker(self.ex)
+                    res = await t.position_entry(PositionEntryIn(symbol=self.symbol, side='bid', order_type='market', qty=position['size']))
+                    logger.info(res)
+
+                    if self.budget == 'all':
+                        self.budget = await tdMgr.get_balance()
+
+                    res = await t.position_entry(PositionEntryIn(symbol=self.symbol, side='ask', order_type='market', qty=self.budget))
+                    logger.info(res)
+            else:
+                res = await TradingBroker(self.ex).position_entry(PositionEntryIn(symbol=self.symbol, side='ask', order_type='market', qty=self.budget))
+                logger.info(res)
+
+        return {'symbol' : self.symbol, 'ex' : self.ex, 'size' : self.budget, 'leverage' : self.leverage}
+
+class BollingerBandStrategy(AutoTradingStrategies):
+    async def run_strategy_loop(self):
+        try:
+            while True:
+                now = pd.Timestamp.now(tz='Asia/Seoul')
+                minutes_to_next = interval_minutes[self.interval] - (now.minute % interval_minutes[self.interval])
+                seconds_to_next = minutes_to_next * 60 - now.second - 3 # 시간차이로 인한 3초 보정
+
+                # Sleep until next candle close
+                await asyncio.sleep(seconds_to_next)
+
+                tdmgr = TradingDataManager(self.ex)
+                kline_df = await tdmgr.get_kline_data()
+
+                # Process signals
+                entry_signal = self.process_signals(kline_df)
+                if entry_signal == 0:
+                    logger.info(f"No signal for {self.symbol}")
+                    await self.update.message.reply_text(f"No signal for {self.symbol}")
+                    continue
+
+                # Entry position
+                res = await self.position_entry(entry_signal)
+                if not res:
+                    logger.info(f"Failed to enter position for {self.symbol}")
+                    return
+                
+                await self.update.message.reply_text(f"티커        : {res['symbol']}\n"
+                                                     f"거래소       : {res['ex']}\n"
+                                                     f"레버리지     : {res['leverage']}\n"
+                                                     f"체결량       : {res['size']}\n",
+                                                     parse_mode='Markdown')
+
+
+        except Exception as e:
+            logger.error(f"Error in BollingerBandStrategy: {str(e)}")
+            logger.error(traceback.format_exc())
+
+    def process_signals(self, kline_data:pd.DataFrame):
+        # Calculate Bollinger Bands
+        kline_data['sma'] = kline_data['close'].rolling(window=20).mean()
+        kline_data['std'] = kline_data['close'].rolling(window=20).std()
+        kline_data['upper_band'] = kline_data['sma'] + (kline_data['std'] * 2)
+        kline_data['lower_band'] = kline_data['sma'] - (kline_data['std'] * 2)
+
+        last_row = kline_data.iloc[-1]
+        
+        # Generate signal
+        if last_row['close'] > last_row['upper_band']:
+            signal = 'ask'  # Sell signal
+        elif last_row['close'] < last_row['lower_band']:
+            signal = 'bid'   # Buy signal
+        else:
+            signal = 0   # No signal
+
+        return signal
+            
 # Define states
 
 # 티커 환율 그래프
@@ -2532,11 +3237,14 @@ ASK_POSITION_ENTRY_EXRATE, ASK_POSITION_ENTRY_BUDGET, ASK_POSITION_ENTRY_LEVERAG
 # 김프포지션 종료
 ASK_POSITION_CLOSE_EXRATE, HANDLE_CLOSE_POSITION = range(25, 27)
 
-# 볼밴 자동매매
-ASK_BOLLINGER_BAND_BUDGET, ASK_BOLLINGER_BAND_LEVERAGE, ASK_BOLLINGER_BAND_INTERVAL, ASK_BOLLINGER_BAND_FOR_EX, HANDLE_BOLLINGER_BAND = range(27, 32)
+# 선물자동매매
+ASK_FUTURE_AUTOTRADING_BUDGET, ASK_FUTURE_AUTOTRADING_LEVERAGE, ASK_FUTURE_AUTOTRADING_STOP_LOSS, ASK_FUTURE_AUTOTRADING_STRATEGY, HANDLE_FUTURE_AUTOTRADING_BB, ASK_FUTURE_AUTOTRADING_FOR_EX, HANDLE_FUTURE_AUTOTRADING = range(27, 34)
 
 # 보조지표로 종목찾기
-HANDLE_SUB_INDICATOR = 32
+HANDLE_SUB_INDICATOR = 34
+
+# 실거래량 감시
+ASK_REAL_VOLUME_MULTIPLIER = 35
 
 # Dictionary to map options to their states and handlers
 conversation_options = {
@@ -2564,11 +3272,32 @@ conversation_options = {
         "handler": ['ask_monitoring_down_threshold', 'ask_monitoring_seed', 'handle_monitoring'],
         "handler_type": ["MessageHandler", "MessageHandler", "MessageHandler"]
     },
-    "볼밴 자동매매": {
-        "entry_action": "ask_bollinger_band_symbol",
-        "state": [ASK_BOLLINGER_BAND_BUDGET, ASK_BOLLINGER_BAND_LEVERAGE, ASK_BOLLINGER_BAND_INTERVAL, ASK_BOLLINGER_BAND_FOR_EX, HANDLE_BOLLINGER_BAND],
-        "handler": ['ask_bollinger_band_budget', 'ask_bollinger_band_leverage', 'ask_bollinger_band_interval', 'ask_bollinger_band_for_ex', 'handle_bollinger_band'],
-        "handler_type": ["MessageHandler", "MessageHandler", "MessageHandler", "CallbackQueryHandler", "CallbackQueryHandler", "CallbackQueryHandler"]
+    "실거래량 감시": {
+        "entry_action": "ask_real_volume_threshold",
+        "state": [ASK_REAL_VOLUME_MULTIPLIER],
+        "handler": ['ask_real_volume_multiplier'],
+        "handler_type": ["MessageHandler"]
+    },  
+    "선물자동매매": {
+        "entry_action": "ask_future_autotrading_symbol",
+        "state": [ASK_FUTURE_AUTOTRADING_BUDGET, 
+                  ASK_FUTURE_AUTOTRADING_LEVERAGE, 
+                  ASK_FUTURE_AUTOTRADING_FOR_EX, 
+                  ASK_FUTURE_AUTOTRADING_STRATEGY, 
+                  HANDLE_FUTURE_AUTOTRADING,
+                  HANDLE_FUTURE_AUTOTRADING_BB],
+        "handler": ['ask_future_autotrading_budget', 
+                    'ask_future_autotrading_leverage', 
+                    'ask_future_autotrading_for_ex', 
+                    'ask_future_autotrading_strategy', 
+                    'handle_future_autotrading',
+                    'handle_future_autotrading_bb'],
+        "handler_type": ["MessageHandler", 
+                         "MessageHandler", 
+                         "MessageHandler", 
+                         "CallbackQueryHandler", 
+                         "CallbackQueryHandler", 
+                         "CallbackQueryHandler"]
     },
     "김프포지션 진입": {
         "entry_action": "ask_position_symbol",
@@ -2589,8 +3318,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Create a reply keyboard
     keyboard = [
         [KeyboardButton("보조지표로 종목추천")],
-        [KeyboardButton("볼밴 자동매매")],
+        [KeyboardButton("선물자동매매")],
         [KeyboardButton("아비트리지 감시")],
+        [KeyboardButton("실거래량 감시")],
         [KeyboardButton("티커 실시간 환율"), KeyboardButton("티커 환율 그래프")],
         [KeyboardButton("김프포지션 진입"), KeyboardButton("김프포지션 종료")],
         [KeyboardButton("봇 종료"), KeyboardButton("취소")]
@@ -2730,6 +3460,7 @@ async def handle_kline(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(str(e))
     finally:
         del context.user_data[event_caller]
+        del context.user_data['event_caller']
         return ConversationHandler.END
 
 
@@ -2830,7 +3561,9 @@ async def exrate_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.message.reply_text(str(e))
     finally:
         del context.user_data[event_caller]
-        return ConversationHandler.END   
+        del context.user_data['event_caller']
+        del context.user_data['stop_event']
+        del context.user_data['task']
 
 @safe_handler
 async def handle_exrate(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2842,10 +3575,10 @@ async def handle_exrate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Initialize the stop event
     context.user_data["stop_event"] = asyncio.Event()
-    
-    task = asyncio.create_task(exrate_task(update, context))
 
+    task = asyncio.create_task(exrate_task(update, context))
     context.user_data["task"] = task
+    return ConversationHandler.END # conversational handler의 마지막에 이게 들어가지 않고, 다른 핸들러가 수행되면, 예상치 못한 이슈가 발생할 수 있음.
 
 
 # 아비트리지 감시 버튼 핸들러
@@ -2877,16 +3610,33 @@ async def handle_monitoring(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Initialize the stop event
     context.user_data["stop_event"] = asyncio.Event()
     
-    try:
-        k = KimpManager()
-        task = asyncio.create_task(k.run_kimp_alarm(update, context))
-        context.user_data["task"] = task
-        return ConversationHandler.END
-    except Exception as e:
-        logger.error(e)
-        await update.message.reply_text(str(e))
-        context.user_data["stop_event"] = None
-        del context.user_data[event_caller]
+    k = KimpManager()
+    task = asyncio.create_task(k.run_kimp_alarm(update, context))
+    context.user_data["task"] = task
+    return ConversationHandler.END
+
+
+# 실거래량 감시 버튼 핸들러
+@safe_handler
+async def ask_real_volume_threshold(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    option = update.message.text
+    context.user_data['event_caller'] = option
+    context.user_data[option] = {}
+    await update.message.reply_text("실거래량의 배수를 입력해주세요 : (예: 10)")
+    return ASK_REAL_VOLUME_MULTIPLIER
+
+@safe_handler
+async def ask_real_volume_multiplier(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    event_caller = context.user_data['event_caller']
+    context.user_data[event_caller]["multiplier"] = float(update.message.text)
+
+    # Initialize the stop event
+    context.user_data["stop_event"] = asyncio.Event()
+
+    k = KimpManager()
+    task = asyncio.create_task(k.run_big_volume_alarm(update, context))
+    context.user_data["task"] = task
+    return ConversationHandler.END
 
 
 # 김프포지션 진입 버튼 핸들러
@@ -3044,6 +3794,10 @@ async def position_task(update: Update, context: ContextTypes.DEFAULT_TYPE, acti
                 short_position = await for_ex.get_balance(symbol)
                 logger.info(short_position)
 
+                res = await krw_ex.post_order(symbol, 'ask', None, str(buy_position - short_position), 'market')
+
+                await asyncio.sleep(0.1)
+
                 new_krw_balance, new_usdt_balance = await asyncio.gather(krw_ex.get_balance('KRW'), for_ex.get_balance('USDT'))
                 new_krw_balance, new_usdt_balance = float(new_krw_balance), float(new_usdt_balance)
 
@@ -3158,7 +3912,7 @@ async def position_task(update: Update, context: ContextTypes.DEFAULT_TYPE, acti
                 await asyncio.sleep(0.1)
 
                 new_krw_balance, new_usdt_balance, res_usdt = await asyncio.gather(krw_ex.get_balance('KRW'), for_ex.get_balance('USDT'), krw_ex.get_single_ticker_price('USDT'))
-                new_krw_balance, new_usdt_balance, res_usdt = float(new_krw_balance), float(new_usdt_balance)
+                new_krw_balance, new_usdt_balance = float(new_krw_balance), float(new_usdt_balance)
 
                 close_exrate = round((new_krw_balance - krw_balance) / (new_usdt_balance - usdt_balance), 3)
                 usdt_price = res_usdt[0]['trade_price']
@@ -3235,6 +3989,9 @@ async def position_task(update: Update, context: ContextTypes.DEFAULT_TYPE, acti
             await update.message.reply_text(str(e))
     finally:
         del context.user_data[event_caller]
+        del context.user_data['event_caller']
+        del context.user_data['stop_event']
+        del context.user_data['task']
         return ConversationHandler.END
 
 
@@ -3295,123 +4052,178 @@ async def handle_sub_indicator(update: Update, context: ContextTypes.DEFAULT_TYP
     event_caller = context.user_data['event_caller']
     context.user_data[event_caller]["interval"] = query.data
 
-    try:
-        k = KimpManager()
-        task = asyncio.create_task(k.get_tickers_by_sub_indicators(update, query.data))
-        context.user_data["task"] = task
-        return ConversationHandler.END
-    except Exception as e:
-        logger.error(e)
-        await update.message.reply_text(str(e))
-        context.user_data["stop_event"] = None
-        del context.user_data[event_caller]
+    k = KimpManager()
+    task = asyncio.create_task(k.get_tickers_by_sub_indicators(update, context))
+    context.user_data["task"] = task
+    return ConversationHandler.END
 
 
-# 볼밴 자동매매 버튼 핸들러
+# 볼밴 선물자동매매 버튼 핸들러
 @safe_handler
-async def ask_bollinger_band_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ask_future_autotrading_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE):
     option = update.message.text
     context.user_data['event_caller'] = option
     context.user_data[option] = {}
-    await update.message.reply_text("Please enter the symbol:")
-    return ASK_BOLLINGER_BAND_BUDGET
+    await update.message.reply_text("티커를 입력해주세요 : (예: XRP)")
+    return ASK_FUTURE_AUTOTRADING_BUDGET
 
 @safe_handler
-async def ask_bollinger_band_budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ask_future_autotrading_budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
     event_caller = context.user_data['event_caller']
-    context.user_data[event_caller]["symbol"] = update.message.text
-    await update.message.reply_text("Please enter your budget (numeric value):")
-    return ASK_BOLLINGER_BAND_LEVERAGE
+
+    context.user_data[event_caller]["symbol"] = update.message.text.upper()
+    await update.message.reply_text("진입마진을 입력해주세요 : (예: 1000, 단위는 USDT)")
+    return ASK_FUTURE_AUTOTRADING_LEVERAGE
 
 @safe_handler
-async def ask_bollinger_band_leverage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ask_future_autotrading_leverage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     event_caller = context.user_data['event_caller']
-    context.user_data[event_caller]["interval"] = update.message.text
-    await update.message.reply_text("Please enter the leverage:")
 
-    return ASK_BOLLINGER_BAND_INTERVAL
+    # Validate the input to ensure it's a valid number
+    if not update.message.text.isdigit():
+        await update.message.reply_text("올바른 숫자를 입력해주세요")
+        return ASK_FUTURE_AUTOTRADING_LEVERAGE
+
+    context.user_data[event_caller]["margin"] = float(update.message.text)
+    await update.message.reply_text("진입레버리지를 입력해주세요 : (예: 10)")
+    return 
 
 @safe_handler
-async def ask_bollinger_band_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ask_future_autotrading_stop_loss(update: Update, context: ContextTypes.DEFAULT_TYPE):
     event_caller = context.user_data['event_caller']
-    context.user_data[event_caller]["budget"] = float(update.message.text)
 
-    keyboard = [
-        [
-            InlineKeyboardButton("1m", callback_data="1m"),
-            InlineKeyboardButton("5m", callback_data="5m"),
-            InlineKeyboardButton("15m", callback_data="15m"),
-            InlineKeyboardButton("30m", callback_data="30m"),
-            InlineKeyboardButton("1h", callback_data="1h"),
-            InlineKeyboardButton("4h", callback_data="4h"),
-            InlineKeyboardButton("1d", callback_data="1d"),
-        ]
-    ]
+    # Validate the input to ensure it's a valid number
+    if not update.message.text.isdigit():
+        await update.message.reply_text("올바른 숫자를 입력해주세요")
+        return ASK_FUTURE_AUTOTRADING_LEVERAGE
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Please choose an interval:", reply_markup=reply_markup)
-
-    return ASK_BOLLINGER_BAND_FOR_EX
+    context.user_data[event_caller]["leverage"] = float(update.message.text)
+    await update.message.reply_text("스탑로스를 입력해주세요 : (예: 5, 단위: %)")
+    return ASK_FUTURE_AUTOTRADING_FOR_EX
 
 @safe_handler
-async def ask_bollinger_band_for_ex(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
+async def ask_future_autotrading_for_ex(update: Update, context: ContextTypes.DEFAULT_TYPE):
     event_caller = context.user_data['event_caller']
-    context.user_data[event_caller]["interval"] = query.data
 
+    # Validate the input to ensure it's a valid number
+    if not update.message.text.isdigit():
+        await update.message.reply_text("올바른 숫자를 입력해주세요")
+        return ASK_FUTURE_AUTOTRADING_STOP_LOSS
+
+    context.user_data[event_caller]["stop_loss"] = float(update.message.text)
+
+    # Define the buttons
     keyboard = [
         [
             InlineKeyboardButton("bybit", callback_data="bybit"),
             InlineKeyboardButton("binance", callback_data="binance"),
-        ]
+        ],
     ]
-
+    
+    # Create an inline keyboard markup
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text("Please choose a foreign exchange:", reply_markup=reply_markup)
 
-    return HANDLE_BOLLINGER_BAND
+    # Send the message with the inline keyboard
+    await update.message.reply_text("해외 거래소를 입력하세요 :", reply_markup=reply_markup)
+
+    return ASK_FUTURE_AUTOTRADING_STRATEGY
 
 @safe_handler
-async def handle_bollinger_band(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ask_future_autotrading_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     event_caller = context.user_data['event_caller']
     context.user_data[event_caller]["for_ex"] = query.data
 
-    try:
-        k = KimpManager()
-        # task = asyncio.create_task(k.get_bollinger_band_picture(context.user_data[event_caller]["symbol"], \
-        #                                                         context.user_data[event_caller]["interval"], \
-        #                                                         context.user_data[event_caller]["for_ex"]))
-        context.user_data["task"] = task
-        return ConversationHandler.END
-    except Exception as e:
-        logger.error(e)
-        await update.message.reply_text(str(e))
-        context.user_data["stop_event"] = None
-        del context.user_data[event_caller]
+    keyboard = [
+        [
+            InlineKeyboardButton("볼린저밴드전략", callback_data="bb"),
+            InlineKeyboardButton("RSI전략", callback_data="rsi"),
+        ]
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text("자동매매 전략을 선택하세요 :", reply_markup=reply_markup)
+
+    return HANDLE_FUTURE_AUTOTRADING
+
+@safe_handler
+async def handle_future_autotrading(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    event_caller = context.user_data['event_caller']
+    context.user_data[event_caller]["strategy"] = query.data
+
+    if query.data == 'bb':
+        keyboard = [
+            [
+                InlineKeyboardButton("1m", callback_data="1h"),
+                InlineKeyboardButton("5m", callback_data="1h"),
+                InlineKeyboardButton("15m", callback_data="1h"),
+                InlineKeyboardButton("1h", callback_data="1h"),
+                InlineKeyboardButton("4h", callback_data="1d"),
+                InlineKeyboardButton("1d", callback_data="1w"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("참조할 보조지표 봉을 선택하세요", reply_markup=reply_markup)
+        return HANDLE_FUTURE_AUTOTRADING_BB
+    elif query.data == 'rsi':
+        pass
+
+@safe_handler
+async def handle_future_autotrading_bb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    event_caller = context.user_data['event_caller']
+    context.user_data[event_caller]["interval"] = query.data
+
+    k = KimpManager()
+    task = asyncio.create_task(k.run_future_autotrading(update, context))
+    context.user_data["task"] = task
+    return ConversationHandler.END
 
 
 # 봇 종료 버튼 핸들러
+@safe_handler
 async def break_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stop_event = context.user_data.get('stop_event')
     task = context.user_data.get('task')
 
-    if not stop_event or not task or task.done():
-        await update.message.reply_text('No running loop to stop...')
+    if not stop_event or not task:
+        await update.message.reply_text('종료할 이벤트가 없습니다.')
         return
     
     stop_event.set()
     await task
+
+    if not task.done():
+        await update.message.reply_text(f'{context.user_data["event_caller"]}가 종료되지 않았습니다')
+        raise ValueError(f'{context.user_data["event_caller"]}가 종료되지 않았습니다')
+
     await update.message.reply_text(f'{context.user_data["event_caller"]}가 정상적으로 종료되었습니다.')
+    
+    if context.user_data.get('stop_event'):
+        del context.user_data['stop_event']
+    if context.user_data.get('task'):
+        del context.user_data['task']
+    if context.user_data.get('event_caller'):
+        del context.user_data['event_caller']
+
     return ConversationHandler.END
 
 # 취소 버튼 핸들러
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info('conversation cancel')
+    if context.user_data.get('stop_event'):
+        del context.user_data['stop_event']
+    if context.user_data.get('task'):
+        del context.user_data['task']
+    if context.user_data.get('event_caller'):
+        del context.user_data['event_caller']
     await update.message.reply_text("정상적으로 취소되었습니다.")
     return ConversationHandler.END
 
