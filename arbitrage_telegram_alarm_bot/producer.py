@@ -30,14 +30,15 @@ def handle_message(message):
     if message['type'] == 'message':
         data = json.loads(message['data'])
         # 결과 처리 로직 추가
-        print(f"Received data: {data}")
+        k = KimpManager()
+        asyncio.run(k.send_telegram(message['data']))
 
 def subscribe_to_redis():
     redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
     pubsub = redis_client.pubsub()
-    pubsub.subscribe('result_channel')
+    pubsub.subscribe('big_volume_tickers')
 
-    print("Subscribed to result_channel. Waiting for messages...")
+    print("Subscribed to big_volume_tickers. Waiting for messages...")
     while True:
         message = pubsub.get_message()
         if message:

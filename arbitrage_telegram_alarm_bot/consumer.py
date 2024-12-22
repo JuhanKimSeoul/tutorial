@@ -6,6 +6,7 @@ import os
 from dotenv import load_dotenv
 from redis.exceptions import ConnectionError, TimeoutError
 import time
+import json
 
 load_dotenv()
 
@@ -33,17 +34,17 @@ def work_task(data, multiplier: int, usdt_price: float, binance_threshold: int):
     if res:
         for item in res:
             try:
-                # 결과를 Redis에 저장
-                redis_client.set(item['ticker'], item)
-                redis_client.publish('big_volume_tickers', item)
+                # 결과를 Redis에 저장 (JSON 형식으로 변환)
+                redis_client.set(item['ticker'], json.dumps(item))
+                redis_client.publish('big_volume_tickers', json.dumps(item))
             except (ConnectionError, TimeoutError) as e:
                 print(f"Redis connection error: {e}")
                 # 재시도 로직 추가
                 reconnect_redis()
-                redis_client.set(item['ticker'], item)
-                redis_client.publish('big_volume_tickers', item)
+                redis_client.set(item['ticker'], json.dumps(item))
+                redis_client.publish('big_volume_tickers', json.dumps(item))
     
-    time.sleep(0.5)
+    time.sleep(1)
 
 def reconnect_redis():
     global redis_client
