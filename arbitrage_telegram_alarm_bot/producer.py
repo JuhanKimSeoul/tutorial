@@ -1,8 +1,11 @@
+import threading
 from celery import Celery, group
 import time
+import redis
 from main import *
 import asyncio
 from apscheduler.schedulers.background import BackgroundScheduler
+
 # from unittest.mock import MagicMock
 
 # # Mock Update 객체 생성
@@ -22,6 +25,24 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # Celery 인스턴스 생성
 app = Celery('producer')
 app.config_from_object('celeryconfig')
+
+def handle_message(message):
+    if message['type'] == 'message':
+        data = json.loads(message['data'])
+        # 결과 처리 로직 추가
+        print(f"Received data: {data}")
+
+def subscribe_to_redis():
+    redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
+    pubsub = redis_client.pubsub()
+    pubsub.subscribe('result_channel')
+
+    print("Subscribed to result_channel. Waiting for messages...")
+    while True:
+        message = pubsub.get_message()
+        if message:
+            handle_message(message)
+        time.sleep(0.01)
 
 @app.task
 def alarm_big_vol_tickers_task(data, multiplier: int, usdt_price: float, binance_threshold: int):
@@ -50,6 +71,10 @@ if __name__ == "__main__":
     scheduler.start()
 
     print("Scheduler started. Press Ctrl+C to exit.")
+
+    # Redis Pub/Sub 구독을 별도의 스레드에서 실행
+    pubsub_thread = threading.Thread(target=subscribe_to_redis)
+    pubsub_thread.start()
 
     try:
         while True:
