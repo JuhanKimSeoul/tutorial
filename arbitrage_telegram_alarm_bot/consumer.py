@@ -5,6 +5,7 @@ import redis
 import os
 from dotenv import load_dotenv
 from redis.exceptions import ConnectionError, TimeoutError
+import time
 
 load_dotenv()
 
@@ -41,6 +42,8 @@ def work_task(data, multiplier: int, usdt_price: float, binance_threshold: int):
                 reconnect_redis()
                 redis_client.set(item['ticker'], item)
                 redis_client.publish('big_volume_tickers', item)
+    
+    time.sleep(0.5)
 
 def reconnect_redis():
     global redis_client

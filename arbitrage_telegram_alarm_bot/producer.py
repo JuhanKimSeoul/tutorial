@@ -58,7 +58,7 @@ def schedule_tasks():
     upbit = res['upbit']
     bithumb = res['bithumb']
     combined_tickers = set(res['upbit']).union(set(res['bithumb']))
-    batch_size = 30
+    batch_size = 10
     for i in range(0, len(combined_tickers), batch_size):
         batch = list(combined_tickers)[i:i + batch_size]
         data = [('upbit' if ticker in upbit else 'bithumb', ticker) for ticker in batch]
