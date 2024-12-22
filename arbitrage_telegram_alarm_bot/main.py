@@ -2223,6 +2223,75 @@ class KimpManager:
             'binance': binance_data
         }
 
+    async def celery_monitor_big_volume_batch(self, data, multiplier: int, usdt_price: float, binance_threshold: int):
+        '''
+            :data: [(exchange, ticker), ...]
+        '''
+        tasks = [self.get_exchange_manager(ex).get_kline(ticker, interval='1m', limit=2) for ex, ticker in data]
+        res = await asyncio.gather(*tasks)
+
+        target = []
+        for item, res in zip(data, res):
+            ex, ticker = item
+
+            if ex in ['upbit', 'bithumb']:
+                df = pd.DataFrame(res)
+                df.rename(columns={'candle_acc_trade_price': 'quote_volume', 'candle_date_time_kst': 'datetime'}, inplace=True)
+                df['timestamp'] = pd.to_datetime(df.datetime)
+                now_candle_timestamp = df.iloc[0].timestamp
+
+            elif ex in ['bybit', 'binance']:
+                df = pd.DataFrame(res, columns=ex_kline_col_map[ex])
+                df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
+                df['timestamp'] = pd.to_datetime(df.timestamp, unit='ms')
+                df.timestamp = df.timestamp.dt.tz_localize('UTC').dt.tz_convert('Asia/Seoul')
+                now_candle_timestamp = df.iloc[0].timestamp
+
+            if ex != 'binance':
+                now_candle_quote_volume = int(float(df.iloc[0].quote_volume))
+                bef_candle_quote_volume = int(float(df.iloc[1].quote_volume))
+            else: # binance는 시간역순으로 데이터를 준다.
+                now_candle_quote_volume = int(float(df.iloc[1].quote_volume))
+                bef_candle_quote_volume = int(float(df.iloc[0].quote_volume))
+            
+            # 1차 필터링 : 거래량이 0인 경우
+            if now_candle_quote_volume == 0 or bef_candle_quote_volume == 0:
+                return
+
+            # 2차 필터링 : 직전 1분간 거래량이 2분간 거래량 * volume_multiplier 보다 작은 경우
+            if now_candle_quote_volume < bef_candle_quote_volume * multiplier:
+                return
+
+            # 3차 필터링
+            if ex in ['upbit', 'bithumb'] and now_candle_quote_volume > 100_000_000:
+                target.append(
+                    {
+                        'exchange': ex,
+                        'ticker': ticker,
+                        'timestamp': now_candle_timestamp,
+                        'quote_volume': now_candle_quote_volume
+                    }
+                )
+            elif ex == 'bybit' and now_candle_quote_volume * usdt_price > 100_000_000:
+                target.append(
+                    {
+                        'exchange': ex,
+                        'ticker': ticker,
+                        'timestamp': now_candle_timestamp,
+                        'quote_volume': int(now_candle_quote_volume * usdt_price)
+                    }
+                )
+            elif ex == 'binance' and now_candle_quote_volume * usdt_price > binance_threshold:
+                target.append(
+                    {
+                        'exchange': ex,
+                        'ticker': ticker,
+                        'timestamp': now_candle_timestamp,
+                        'quote_volume': int(now_candle_quote_volume * usdt_price)
+                    }
+                )
+        return target
+
     async def run_big_volume_alarm(self, update, context):
         event_caller = context.user_data['event_caller']
         volume_multiplier = context.user_data[event_caller]['multiplier']
