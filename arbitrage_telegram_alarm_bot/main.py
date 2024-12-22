@@ -2256,11 +2256,11 @@ class KimpManager:
             
             # 1차 필터링 : 거래량이 0인 경우
             if now_candle_quote_volume == 0 or bef_candle_quote_volume == 0:
-                return
+                continue
 
             # 2차 필터링 : 직전 1분간 거래량이 2분간 거래량 * volume_multiplier 보다 작은 경우
             if now_candle_quote_volume < bef_candle_quote_volume * multiplier:
-                return
+                continue
 
             # 3차 필터링
             if ex in ['upbit', 'bithumb'] and now_candle_quote_volume > 100_000_000:
