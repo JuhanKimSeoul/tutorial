@@ -24,7 +24,7 @@ app = Celery('producer')
 app.config_from_object('celeryconfig')
 
 @app.task
-def celery_monitor_big_volume_batch(data, multiplier: int, usdt_price: float, binance_threshold: int):
+def alarm_big_vol_tickers_task(data, multiplier: int, usdt_price: float, binance_threshold: int):
     '''
         data = [(ex, ticker)...]
     '''
@@ -41,7 +41,7 @@ def schedule_tasks():
     for i in range(0, len(combined_tickers), batch_size):
         batch = list(combined_tickers)[i:i + batch_size]
         data = [('upbit' if ticker in upbit else 'bithumb', ticker) for ticker in batch]
-        tasks = [celery_monitor_big_volume_batch(data, 5, 1500, 100_000_000)]
+        tasks = [alarm_big_vol_tickers_task.s(data, 5, 1500, 100_000_000)]
         group(tasks).apply_async()
 
 if __name__ == "__main__":
