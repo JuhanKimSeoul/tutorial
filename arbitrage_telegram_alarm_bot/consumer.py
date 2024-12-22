@@ -6,7 +6,7 @@ import asyncio
 app = Celery('consumer')
 app.config_from_object('celeryconfig')
 
-@app.task(name='producer.work_task')
+@app.task(name='producer.alarm_big_vol_tickers_task')
 def work_task(data, multiplier: int, usdt_price: float, binance_threshold: int):
     '''
         data = [(ex, ticker)...]
