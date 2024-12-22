@@ -31,7 +31,10 @@ def handle_message(message):
         data = json.loads(message['data'])
         # 결과 처리 로직 추가
         k = KimpManager()
-        asyncio.run(k.send_telegram(message['data']))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(k.send_telegram(message['data']))
+        loop.close()
 
 def subscribe_to_redis():
     redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
