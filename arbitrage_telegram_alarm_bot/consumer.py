@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from redis.exceptions import ConnectionError, TimeoutError
 import time
 import json
+from datetime import datetime
 
 load_dotenv()
 
@@ -23,6 +24,11 @@ redis_client = redis.StrictRedis(
 app = Celery('consumer')
 app.config_from_object('celeryconfig')
 
+def json_serializer(obj):
+    if isinstance(obj, (datetime,)):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
+
 @app.task(name='producer.alarm_big_vol_tickers_task')
 def work_task(data, multiplier: int, usdt_price: float, binance_threshold: int):
     '''
@@ -35,14 +41,14 @@ def work_task(data, multiplier: int, usdt_price: float, binance_threshold: int):
         for item in res:
             try:
                 # 결과를 Redis에 저장 (JSON 형식으로 변환)
-                redis_client.set(item['ticker'], json.dumps(item))
-                redis_client.publish('big_volume_tickers', json.dumps(item))
+                redis_client.set(item['ticker'], json.dumps(item, default=json_serializer))
+                redis_client.publish('big_volume_tickers', json.dumps(item, default=json_serializer))
             except (ConnectionError, TimeoutError) as e:
                 print(f"Redis connection error: {e}")
                 # 재시도 로직 추가
                 reconnect_redis()
-                redis_client.set(item['ticker'], json.dumps(item))
-                redis_client.publish('big_volume_tickers', json.dumps(item))
+                redis_client.set(item['ticker'], json.dumps(item, default=json_serializer))
+                redis_client.publish('big_volume_tickers', json.dumps(item, default=json_serializer))
     
     time.sleep(1)
 
