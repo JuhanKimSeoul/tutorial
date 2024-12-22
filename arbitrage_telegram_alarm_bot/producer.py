@@ -36,11 +36,11 @@ def handle_message(message):
             if loop.is_closed():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-            loop.run_until_complete(k.send_telegram(data))
+            loop.run_until_complete(k.send_telegram(message['data']))
         except RuntimeError as e:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(k.send_telegram(data))
+            loop.run_until_complete(k.send_telegram(message['data']))
             
 
 def subscribe_to_redis():
