@@ -29,7 +29,7 @@ def json_serializer(obj):
         return obj.isoformat()
     raise TypeError(f"Type {type(obj)} not serializable")
 
-@app.task(name='producer.alarm_big_vol_tickers_task')
+@app.task(name='producer.alarm_big_vol_tickers_task', ignore_result=True)
 def work_task(data, multiplier: int, usdt_price: float, binance_threshold: int):
     '''
         data = [(ex, ticker)...]
