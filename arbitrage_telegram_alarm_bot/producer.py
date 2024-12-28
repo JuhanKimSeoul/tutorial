@@ -5,6 +5,7 @@ import redis
 from main import *
 import asyncio
 from apscheduler.schedulers.background import BackgroundScheduler
+from pytz import timezone  # 추가
 
 # from unittest.mock import MagicMock
 
@@ -81,7 +82,8 @@ def schedule_tasks():
     group(tasks).apply_async()
 
 if __name__ == "__main__":
-    scheduler = BackgroundScheduler()
+    kst = timezone('Asia/Seoul')  # 한국 시간대 설정
+    scheduler = BackgroundScheduler(timezone=kst)  # 명시적으로 한국 시간대 설정
     scheduler.add_job(schedule_tasks, 'cron', minute='*/5')  # 5분마다 실행
     scheduler.start()
 
