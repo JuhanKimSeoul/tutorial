@@ -2264,7 +2264,7 @@ class KimpManager:
                 continue
 
             # 3차 필터링
-            if ex in ['upbit', 'bithumb'] and now_candle_quote_volume > 100_000_000:
+            if ex in ['upbit', 'bithumb'] and now_candle_quote_volume > 300_000_000: # 3억원
                 target.append(
                     {
                         'exchange': ex,
@@ -2273,7 +2273,7 @@ class KimpManager:
                         'quote_volume': now_candle_quote_volume
                     }
                 )
-            elif ex == 'bybit' and now_candle_quote_volume * usdt_price > 100_000_000:
+            elif ex == 'bybit' and now_candle_quote_volume * usdt_price > 300_000_000:
                 target.append(
                     {
                         'exchange': ex,

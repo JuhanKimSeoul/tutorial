@@ -63,32 +63,24 @@ def alarm_big_vol_tickers_task(data, multiplier: int, usdt_price: float, binance
     pass
 
 def schedule_tasks():
-    # k = KimpManager()
-    # res = asyncio.run(k.get_all_tickers())
+    k = KimpManager()
+    res = asyncio.run(k.get_all_tickers())
 
-    # upbit = res['upbit']
-    # bithumb = res['bithumb']
-    # combined_tickers = set(res['upbit']).union(set(res['bithumb']))
-    # batch_size = 10
-    # for i in range(0, len(combined_tickers), batch_size):
-    #     batch = list(combined_tickers)[i:i + batch_size]
-    #     data = [('upbit' if ticker in upbit else 'bithumb', ticker) for ticker in batch]
-    #     tasks = [alarm_big_vol_tickers_task.s(data, 5, 1500, 100_000_000)]
-    #     group(tasks).apply_async()
-    test_data = [
-        [{'exchange': 'upbit', 'ticker': 'BTC'}],
-        [{'exchange': 'upbit', 'ticker': 'ETH'}],
-        [{'exchange': 'upbit', 'ticker': 'XRP'}],
-        [{'exchange': 'upbit', 'ticker': 'ADA'}],
-        [{'exchange': 'upbit', 'ticker': 'DOT'}],
-        [{'exchange': 'upbit', 'ticker': 'DOGE'}],
-    ]
-    tasks = [alarm_big_vol_tickers_task.s(item, 5, 1500, 100_000_000) for item in test_data]
+    upbit = [ {'exchange' : 'upbit', 'ticker' : ticker} for ticker in res['upbit']]
+    bithumb = [ {'exchange' : 'bithumb', 'ticker' : ticker} for ticker in res['bithumb']]
+    bybit = [ {'exchange' : 'bybit', 'ticker' : ticker} for ticker in res['bybit']]
+    combined = upbit + bithumb + bybit
+    union_combined = list({v['ticker']:v for v in combined}.values())
+    batch_size = 10
+    tasks = []
+    for i in range(0, len(union_combined), batch_size):
+        batch = union_combined[i:i + batch_size]
+        tasks.append(alarm_big_vol_tickers_task.s(batch, 5, 1500, 100_000_000))
     group(tasks).apply_async()
 
 if __name__ == "__main__":
     scheduler = BackgroundScheduler()
-    scheduler.add_job(schedule_tasks, 'cron', minute='*')  # 매분 실행
+    scheduler.add_job(schedule_tasks, 'cron', minute='*')  # 5분마다 실행
     scheduler.start()
 
     print("Scheduler started. Press Ctrl+C to exit.")
