@@ -1,0 +1,36 @@
+{
+    "version": 1,
+    "disable_existing_loggers": false,
+    "formatters": {
+        "simple": {
+            "format": "%(asctime)s - %(threadName)s - %(name)s - %(lineno)d - %(levelname)s - %(message)s"
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "level": "DEBUG",
+            "formatter": "simple",
+            "stream": "ext://sys.stdout"
+        },
+        "timed_rotating_file": {
+            "class": "logger.custom_log_file_handler.CustomTimedRotatingFileHandler",
+            "level": "DEBUG",
+            "formatter": "simple",
+            "filename": "logs/app",
+            "when": "midnight",
+            "interval": 1,
+            "backupCount": 7
+        }
+    },
+    "loggers": {
+        "": {
+            "handlers": [
+                "console",
+                "timed_rotating_file"
+            ],
+            "level": "DEBUG",
+            "propagate": true
+        }
+    }
+}

@@ -2227,7 +2227,7 @@ class KimpManager:
         '''
             :data: [(exchange, ticker), ...]
         '''
-        tasks = [self.get_exchange_manager(ex).get_kline(ticker, interval='1m', limit=2) for ex, ticker in data]
+        tasks = [self.get_exchange_manager(ex).get_kline(ticker, interval='5m', limit=3) for ex, ticker in data]
         res = await asyncio.gather(*tasks)
 
         target = []
@@ -2247,12 +2247,12 @@ class KimpManager:
                 df.timestamp = df.timestamp.dt.tz_localize('UTC').dt.tz_convert('Asia/Seoul')
                 now_candle_timestamp = df.iloc[0].timestamp
 
-            if ex != 'binance':
-                now_candle_quote_volume = int(float(df.iloc[0].quote_volume))
+            if ex != 'binance': # binance를 제외하고는 시간 내림차순으로 데이터를 준다.
+                now_candle_quote_volume = int(float(df.iloc[1].quote_volume)) # 직전 5분봉
+                bef_candle_quote_volume = int(float(df.iloc[2].quote_volume)) # 2번째 직전 5분봉
+            else: # binance는 시간 오름차순으로 데이터를 준다.
+                now_candle_quote_volume = int(float(df.iloc[2].quote_volume))
                 bef_candle_quote_volume = int(float(df.iloc[1].quote_volume))
-            else: # binance는 시간역순으로 데이터를 준다.
-                now_candle_quote_volume = int(float(df.iloc[1].quote_volume))
-                bef_candle_quote_volume = int(float(df.iloc[0].quote_volume))
             
             # 1차 필터링 : 거래량이 0인 경우
             if now_candle_quote_volume == 0 or bef_candle_quote_volume == 0:

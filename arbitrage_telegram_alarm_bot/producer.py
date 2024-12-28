@@ -63,18 +63,22 @@ def alarm_big_vol_tickers_task(data, multiplier: int, usdt_price: float, binance
     pass
 
 def schedule_tasks():
-    k = KimpManager()
-    res = asyncio.run(k.get_all_tickers())
+    # k = KimpManager()
+    # res = asyncio.run(k.get_all_tickers())
 
-    upbit = res['upbit']
-    bithumb = res['bithumb']
-    combined_tickers = set(res['upbit']).union(set(res['bithumb']))
-    batch_size = 10
-    for i in range(0, len(combined_tickers), batch_size):
-        batch = list(combined_tickers)[i:i + batch_size]
-        data = [('upbit' if ticker in upbit else 'bithumb', ticker) for ticker in batch]
-        tasks = [alarm_big_vol_tickers_task.s(data, 5, 1500, 100_000_000)]
-        group(tasks).apply_async()
+    # upbit = res['upbit']
+    # bithumb = res['bithumb']
+    # combined_tickers = set(res['upbit']).union(set(res['bithumb']))
+    # batch_size = 10
+    # for i in range(0, len(combined_tickers), batch_size):
+    #     batch = list(combined_tickers)[i:i + batch_size]
+    #     data = [('upbit' if ticker in upbit else 'bithumb', ticker) for ticker in batch]
+    #     tasks = [alarm_big_vol_tickers_task.s(data, 5, 1500, 100_000_000)]
+    #     group(tasks).apply_async()
+
+    test_data = [('upbit', 'BTC'), ('upbit', 'ETH'), ('upbit', 'XRP'), ('upbit', 'ADA'), ('upbit', 'DOGE')]
+    tasks = [alarm_big_vol_tickers_task.s(test_data, 5, 1500, 100_000_000)]
+    group(tasks).apply_async()
 
 if __name__ == "__main__":
     scheduler = BackgroundScheduler()

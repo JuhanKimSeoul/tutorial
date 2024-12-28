@@ -1,3 +1,5 @@
+import logging
+from logging.handlers import RotatingFileHandler
 from celery import Celery
 from main import *
 import asyncio
@@ -24,6 +26,14 @@ redis_client = redis.StrictRedis(
 app = Celery('consumer')
 app.config_from_object('celeryconfig')
 
+# 로거 설정
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler = RotatingFileHandler('./celery.log', maxBytes=5*1024*1024, backupCount=3)  # 5MB, 최대 3개의 백업 파일
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
 def json_serializer(obj):
     if isinstance(obj, (datetime,)):
         return obj.isoformat()
@@ -34,6 +44,7 @@ def work_task(data, multiplier: int, usdt_price: float, binance_threshold: int):
     '''
         data = [(ex, ticker)...]
     '''
+    logger.info(f"Received data: {data}")
     k = KimpManager()
     res = asyncio.run(k.celery_monitor_big_volume_batch(data, multiplier, usdt_price, binance_threshold))
 
@@ -44,12 +55,13 @@ def work_task(data, multiplier: int, usdt_price: float, binance_threshold: int):
                 redis_client.set(item['ticker'], json.dumps(item, default=json_serializer))
                 redis_client.publish('big_volume_tickers', json.dumps(item, default=json_serializer))
             except (ConnectionError, TimeoutError) as e:
-                print(f"Redis connection error: {e}")
+                logger.error(f"Redis connection error: {e}")
                 # 재시도 로직 추가
                 reconnect_redis()
                 redis_client.set(item['ticker'], json.dumps(item, default=json_serializer))
                 redis_client.publish('big_volume_tickers', json.dumps(item, default=json_serializer))
     
+    logger.info("Task completed successfully")
     time.sleep(1)
 
 def reconnect_redis():
@@ -65,10 +77,10 @@ def reconnect_redis():
             )
             # 연결 테스트
             redis_client.ping()
-            print("Reconnected to Redis")
+            logger.info("Reconnected to Redis")
             break
         except (ConnectionError, TimeoutError) as e:
-            print(f"Retrying Redis connection: {e}")
+            logger.error(f"Retrying Redis connection: {e}")
             time.sleep(5)
 
 if __name__ == "__main__":
