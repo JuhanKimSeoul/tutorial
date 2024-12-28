@@ -2225,9 +2225,9 @@ class KimpManager:
 
     async def celery_monitor_big_volume_batch(self, data, multiplier: int, usdt_price: float, binance_threshold: int):
         '''
-            :data: [(exchange, ticker), ...]
+            :data: [{'exchange': 'upbit', 'ticker': 'BTC'}, {'exchange': 'bithumb', 'ticker': 'BTC'}, ...]
         '''
-        tasks = [self.get_exchange_manager(ex).get_kline(ticker, interval='5m', limit=3) for ex, ticker in data]
+        tasks = [self.get_exchange_manager(item['exchange']).get_kline(item['ticker'], interval='5m', limit=3) for item in data]
         res = await asyncio.gather(*tasks)
 
         target = []

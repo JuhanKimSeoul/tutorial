@@ -75,8 +75,18 @@ def schedule_tasks():
     #     data = [('upbit' if ticker in upbit else 'bithumb', ticker) for ticker in batch]
     #     tasks = [alarm_big_vol_tickers_task.s(data, 5, 1500, 100_000_000)]
     #     group(tasks).apply_async()
-
-    test_data = [('upbit', 'BTC'), ('upbit', 'ETH'), ('upbit', 'XRP'), ('upbit', 'ADA'), ('upbit', 'DOGE')]
+    test_data = [
+        {'exchange': 'upbit', 'ticker': 'BTC'},
+        {'exchange': 'upbit', 'ticker': 'ETH'},
+        {'exchange': 'upbit', 'ticker': 'XRP'},
+        {'exchange': 'upbit', 'ticker': 'ADA'},
+        {'exchange': 'upbit', 'ticker': 'DOGE'},
+        {'exchange': 'bithumb', 'ticker': 'BTC'},
+        {'exchange': 'bithumb', 'ticker': 'ETH'},
+        {'exchange': 'bithumb', 'ticker': 'XRP'},
+        {'exchange': 'bithumb', 'ticker': 'ADA'},
+        {'exchange': 'bithumb', 'ticker': 'DOGE'}
+    ]
     tasks = [alarm_big_vol_tickers_task.s(item, 5, 1500, 100_000_000) for item in test_data]
     group(tasks).apply_async()
 
