@@ -77,7 +77,7 @@ def schedule_tasks():
     #     group(tasks).apply_async()
 
     test_data = [('upbit', 'BTC'), ('upbit', 'ETH'), ('upbit', 'XRP'), ('upbit', 'ADA'), ('upbit', 'DOGE')]
-    tasks = [alarm_big_vol_tickers_task.s(test_data, 5, 1500, 100_000_000)]
+    tasks = [alarm_big_vol_tickers_task.s(item, 5, 1500, 100_000_000) for item in test_data]
     group(tasks).apply_async()
 
 if __name__ == "__main__":
