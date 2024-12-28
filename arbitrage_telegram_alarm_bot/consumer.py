@@ -28,11 +28,11 @@ app.config_from_object('celeryconfig')
 
 # 로거 설정
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = RotatingFileHandler('./celery.log', maxBytes=5*1024*1024, backupCount=3)  # 5MB, 최대 3개의 백업 파일
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+# logger.setLevel(logging.INFO)
+# handler = RotatingFileHandler('./celery.log', maxBytes=5*1024*1024, backupCount=3)  # 5MB, 최대 3개의 백업 파일
+# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# handler.setFormatter(formatter)
+# logger.addHandler(handler)
 
 def json_serializer(obj):
     if isinstance(obj, (datetime,)):
