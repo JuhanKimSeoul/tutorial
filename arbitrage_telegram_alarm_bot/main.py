@@ -2239,14 +2239,14 @@ class KimpManager:
                 df = pd.DataFrame(res)
                 df.rename(columns={'candle_acc_trade_price': 'quote_volume', 'candle_date_time_kst': 'datetime'}, inplace=True)
                 df['timestamp'] = pd.to_datetime(df.datetime)
-                now_candle_timestamp = df.iloc[0].timestamp
+                now_candle_timestamp = df.iloc[1].timestamp
 
             elif ex in ['bybit', 'binance']:
                 df = pd.DataFrame(res, columns=ex_kline_col_map[ex])
                 df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
                 df['timestamp'] = pd.to_datetime(df.timestamp, unit='ms')
                 df.timestamp = df.timestamp.dt.tz_localize('UTC').dt.tz_convert('Asia/Seoul')
-                now_candle_timestamp = df.iloc[0].timestamp
+                now_candle_timestamp = df.iloc[1].timestamp
 
             if ex != 'binance': # binance를 제외하고는 시간 내림차순으로 데이터를 준다.
                 now_candle_quote_volume = int(float(df.iloc[1].quote_volume)) # 직전 5분봉

@@ -65,6 +65,8 @@ def alarm_big_vol_tickers_task(data, multiplier: int, usdt_price: float, binance
 def schedule_tasks():
     k = KimpManager()
     res = asyncio.run(k.get_all_tickers())
+    res2 = asyncio.run(UpbitManager().get_single_ticker_price('USDT'))
+    usdt_price = res2[0]['trade_price']
 
     upbit = [ {'exchange' : 'upbit', 'ticker' : ticker} for ticker in res['upbit']]
     bithumb = [ {'exchange' : 'bithumb', 'ticker' : ticker} for ticker in res['bithumb']]
@@ -75,7 +77,7 @@ def schedule_tasks():
     tasks = []
     for i in range(0, len(union_combined), batch_size):
         batch = union_combined[i:i + batch_size]
-        tasks.append(alarm_big_vol_tickers_task.s(batch, 5, 1500, 100_000_000))
+        tasks.append(alarm_big_vol_tickers_task.s(batch, 5, usdt_price, 100_000_000))
     group(tasks).apply_async()
 
 if __name__ == "__main__":
