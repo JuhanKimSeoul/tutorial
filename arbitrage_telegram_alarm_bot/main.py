@@ -2232,7 +2232,8 @@ class KimpManager:
 
         target = []
         for item, res in zip(data, res):
-            ex, ticker = item
+            ex = item['exchange']
+            ticker = item['ticker']
 
             if ex in ['upbit', 'bithumb']:
                 df = pd.DataFrame(res)
