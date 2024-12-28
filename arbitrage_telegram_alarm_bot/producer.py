@@ -80,7 +80,7 @@ def schedule_tasks():
 
 if __name__ == "__main__":
     scheduler = BackgroundScheduler()
-    scheduler.add_job(schedule_tasks, 'cron', minute='*')  # 5분마다 실행
+    scheduler.add_job(schedule_tasks, 'cron', minute='*/5')  # 5분마다 실행
     scheduler.start()
 
     print("Scheduler started. Press Ctrl+C to exit.")
