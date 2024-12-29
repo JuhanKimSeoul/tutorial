@@ -72,7 +72,7 @@ def schedule_tasks():
     upbit = [ {'exchange' : 'upbit', 'ticker' : ticker} for ticker in res['upbit']]
     bithumb = [ {'exchange' : 'bithumb', 'ticker' : ticker} for ticker in res['bithumb']]
     bybit = [ {'exchange' : 'bybit', 'ticker' : ticker} for ticker in res['bybit']]
-    combined = upbit + bithumb + bybit
+    combined = bybit + bithumb + upbit
     union_combined = list({v['ticker']:v for v in combined}.values())
     batch_size = 10
     tasks = []
