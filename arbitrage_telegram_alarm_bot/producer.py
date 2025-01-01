@@ -54,7 +54,7 @@ def subscribe_to_redis():
         message = pubsub.get_message()
         if message:
             handle_message(message)
-        time.sleep(0.01)
+        time.sleep(1)  # 대기 시간을 추가하여 CPU 사용량 줄이기
 
 @app.task
 def alarm_big_vol_tickers_task(data, multiplier: int, usdt_price: float, binance_threshold: int):
@@ -95,6 +95,6 @@ if __name__ == "__main__":
 
     try:
         while True:
-            pass
+            time.sleep(1)  # 대기 시간을 추가하여 CPU 사용량 줄이기
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
