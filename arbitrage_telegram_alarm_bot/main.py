@@ -1241,15 +1241,15 @@ class BybitManager(ExchangeManager):
                     "side": "Buy",
                     "orderType": "Market",
                     "qty": "1",
+                    "takeProfit": "1000000",
+                    "stopLoss": "900000",
                     "tpslMode": "Full",
-                    "tpOrderType": "Market", # default
-                    "slOrderType": "Market", # default
-                    "slLimitPrice": "10000",
                 }
         ''' 
         endpoint = self.config.order_url
         params: BybitPositionEntryIn = PositionEntryMapper.to_exchange(PositionEntryIn, self.config.name).not_None_to_dict()
-
+        params['symbol'] = self.ticker_mapper(params['symbol'])
+        print(json.dumps(params, indent=4))
         timestamp = str(int(time.time() * 1000))
         recv_window = "5000"
 
@@ -1309,7 +1309,6 @@ class BybitManager(ExchangeManager):
         }
 
         res = await self.request('post', endpoint, headers, json_payload, 'x-www-form-urlencoded')
-        logger.debug(res)
         if res['retMsg'] == 'leverage not modified' or res['retMsg'].lower() == 'ok':
             return True
         return False
@@ -2237,7 +2236,15 @@ class KimpManager:
 
             if ex in ['upbit', 'bithumb']:
                 df = pd.DataFrame(res)
-                df.rename(columns={'candle_acc_trade_price': 'quote_volume', 'candle_date_time_kst': 'datetime'}, inplace=True)
+                column_maper = {
+                    'opening_price': 'open',
+                    'high_price': 'high',
+                    'low_price': 'low',
+                    'trade_price': 'close',
+                    'candle_acc_trade_price': 'quote_volume',
+                    'candle_date_time_kst': 'datetime'
+                }
+                df.rename(columns=column_maper, inplace=True)
                 df['timestamp'] = pd.to_datetime(df.datetime)
                 now_candle_timestamp = df.iloc[1].timestamp
 
@@ -2263,6 +2270,13 @@ class KimpManager:
             if now_candle_quote_volume < bef_candle_quote_volume * multiplier:
                 continue
 
+            # 현재봉이 음봉인지 양봉인지 표시
+            candle_type = None
+            if df.iloc[1].close > df.iloc[1].open:
+                candle_type = '+'
+            else:
+                candle_type = '-'
+
             # 3차 필터링
             if ex in ['upbit', 'bithumb'] and now_candle_quote_volume > 300_000_000: # 3억원
                 target.append(
@@ -2270,7 +2284,8 @@ class KimpManager:
                         'exchange': ex,
                         'ticker': ticker,
                         'timestamp': now_candle_timestamp,
-                        'quote_volume': now_candle_quote_volume
+                        'quote_volume': now_candle_quote_volume,
+                        'candle_type': candle_type
                     }
                 )
             elif ex == 'bybit' and now_candle_quote_volume * usdt_price > 300_000_000:
@@ -2279,7 +2294,8 @@ class KimpManager:
                         'exchange': ex,
                         'ticker': ticker,
                         'timestamp': now_candle_timestamp,
-                        'quote_volume': int(now_candle_quote_volume * usdt_price)
+                        'quote_volume': int(now_candle_quote_volume * usdt_price),
+                        'candle_type': candle_type
                     }
                 )
             elif ex == 'binance' and now_candle_quote_volume * usdt_price > binance_threshold:
@@ -2288,7 +2304,8 @@ class KimpManager:
                         'exchange': ex,
                         'ticker': ticker,
                         'timestamp': now_candle_timestamp,
-                        'quote_volume': int(now_candle_quote_volume * usdt_price)
+                        'quote_volume': int(now_candle_quote_volume * usdt_price),
+                        'candle_type': candle_type
                     }
                 )
         return target
@@ -3119,31 +3136,33 @@ class TradingDataManager:
 
         return df
 
-    async def get_position(self)->dict:
-        res_list = await self.ex.get_all_positions()
-        for item in res_list:
-            if item['symbol'] == self.symbol:
-                return item
-        return None
+    async def get_all_position(self)->dict:
+        return await self.ex.get_all_position_info()
 
     async def get_balance(self):
         if self.ex_name in ['upbit', 'bithumb']:
             return await self.ex.get_balance('KRW')
         return await self.ex.get_balance('USDT')
+
+    async def get_min_order_qty(self, symbol):
+        return await self.ex.get_min_order_qty(symbol)
+
+    async def get_single_ticker_price(self, symbol):
+        return await self.ex.get_single_ticker_price(symbol)
+
+    async def set_leverage(self, symbol, leverage):
+        return await self.ex.set_leverage('linear', symbol, leverage)
     
 class TradingBroker:
     def __init__(self, ex):
         self.ex_name = ex
         self.ex = globals()[f'{ex.capitalize()}Manager']()
 
-    async def position_entry(self, PositionEntryIn: PositionEntryIn):
-        params = PositionEntryIn.to_exchange(PositionEntryIn, self.ex_name)
-        res = await self.ex.post_order(params)
-
+    async def send_order(self, PositionEntryIn: PositionEntryIn):
         if self.ex_name == 'bybit':
-            res = await self.ex.post_order(params)
-            if res.get('ret_msg') == 'ok':
-                return res
+            res = await self.ex.post_order(PositionEntryIn)
+            if res.get('ret_msg') == 'OK':
+                return True
             raise ValueError(res)
         
         elif self.ex_name == 'binance':
@@ -3199,16 +3218,16 @@ class AutoTradingStrategies(ABC):
                     return False
                 else:
                     t = TradingBroker(self.ex)
-                    res = await t.position_entry(PositionEntryIn(symbol=self.symbol, side='ask', order_type='market', qty=position['size']))
+                    res = await t.send_order(PositionEntryIn(symbol=self.symbol, side='ask', order_type='market', qty=position['size']))
                     logger.info(res)
 
                     if self.budget == 'all':
                         self.budget = await tdMgr.get_balance()
 
-                    res = await t.position_entry(PositionEntryIn(symbol=self.symbol, side='bid', order_type='market', qty=self.budget))
+                    res = await t.send_order(PositionEntryIn(symbol=self.symbol, side='bid', order_type='market', qty=self.budget))
                     logger.info(res)
             else:
-                res = await TradingBroker(self.ex).position_entry(PositionEntryIn(symbol=self.symbol, side='bid', order_type='market', qty=self.budget))
+                res = await TradingBroker(self.ex).send_order(PositionEntryIn(symbol=self.symbol, side='bid', order_type='market', qty=self.budget))
                 logger.info(res)
 
         elif signal == 'ask':
@@ -3219,16 +3238,16 @@ class AutoTradingStrategies(ABC):
                     return False
                 else:
                     t = TradingBroker(self.ex)
-                    res = await t.position_entry(PositionEntryIn(symbol=self.symbol, side='bid', order_type='market', qty=position['size']))
+                    res = await t.send_order(PositionEntryIn(symbol=self.symbol, side='bid', order_type='market', qty=position['size']))
                     logger.info(res)
 
                     if self.budget == 'all':
                         self.budget = await tdMgr.get_balance()
 
-                    res = await t.position_entry(PositionEntryIn(symbol=self.symbol, side='ask', order_type='market', qty=self.budget))
+                    res = await t.send_order(PositionEntryIn(symbol=self.symbol, side='ask', order_type='market', qty=self.budget))
                     logger.info(res)
             else:
-                res = await TradingBroker(self.ex).position_entry(PositionEntryIn(symbol=self.symbol, side='ask', order_type='market', qty=self.budget))
+                res = await TradingBroker(self.ex).send_order(PositionEntryIn(symbol=self.symbol, side='ask', order_type='market', qty=self.budget))
                 logger.info(res)
 
         return {'symbol' : self.symbol, 'ex' : self.ex, 'size' : self.budget, 'leverage' : self.leverage}

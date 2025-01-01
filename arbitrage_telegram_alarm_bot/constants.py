@@ -171,8 +171,10 @@ class BybitPositionEntryIn:
     qty: str
     category: str = 'linear'
     tpslMode: str = None # Full or Partial
+    tpOrderType: str = None # Market or Limit
     slOrderType: str = None # Market or Limit
-    slLimitPrice: str = None 
+    takeProfit: str = None
+    stopLoss: str = None
 
     def to_dict(self):
         return asdict(self)
@@ -256,8 +258,10 @@ class PositionEntryMapper:
             orderType=PositionEntryMapper.ORDER_TYPE_MAP[entry.order_type],
             qty=str(entry.qty),
             tpslMode='Full' if entry.tp or entry.sl else None,
+            tpOrderType='Market' if entry.tp else None,
             slOrderType='Market' if entry.sl else None,
-            slLimitPrice=str(entry.sl) if entry.sl else None
+            takeProfit=str(entry.tp) if entry.tp else None,
+            stopLoss=str(entry.sl) if entry.sl else None
         )
 
     @staticmethod

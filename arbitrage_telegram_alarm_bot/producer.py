@@ -27,9 +27,40 @@ from pytz import timezone  # 추가
 app = Celery('producer')
 app.config_from_object('celeryconfig')
 
+async def order_handler(data):
+    t = TradingDataManager(data.get('exchange'))
+
+    if t.config.name != 'bybit':
+        return False
+
+    balance, minOrderQty, price = await asyncio.gather(
+        t.get_balance(),
+        t.get_min_order_qty(data.get('ticker')),
+        t.get_single_ticker_price(data.get('ticker')),
+        t.set_leverage(data.get('ticker'), '2')
+    )
+    tp = price * (1 + 0.02)
+    sl = price * (1 - 0.02)
+
+    if float(balance) > float(minOrderQty) * float(price):
+        order = PositionEntryIn(
+            symbol=data.get('ticker'),
+            side='bid' if data.get('candle_type') == '-' else 'ask',
+            order_type='market',
+            qty=minOrderQty,
+            tp=tp,
+            sl=sl
+        )
+        return await TradingBroker('bybit').send_order(order)
+    return False
+
 def handle_message(message):
     if message['type'] == 'message':
         data = json.loads(message['data'])
+
+        if data.get('exchange') == 'bybit':
+            asyncio.run(order_handler(data))
+
         # 결과 처리 로직 추가
         k = KimpManager()
         try:
@@ -37,11 +68,17 @@ def handle_message(message):
             if loop.is_closed():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-            loop.run_until_complete(k.send_telegram(message['data']))
+            loop.run_until_complete(asyncio.gather(
+                k.send_telegram(message['data']),
+                order_handler(data)
+            ))
         except RuntimeError as e:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(k.send_telegram(message['data']))
+            loop.run_until_complete(asyncio.gather(
+                k.send_telegram(message['data']),
+                order_handler(data)
+            ))
             
 
 def subscribe_to_redis():
