@@ -2271,11 +2271,7 @@ class KimpManager:
                 continue
 
             # 현재봉이 음봉인지 양봉인지 표시
-            candle_type = None
-            if df.iloc[1].close > df.iloc[1].open:
-                candle_type = '+'
-            else:
-                candle_type = '-'
+            candle_type = '+' if df.iloc[1].close > df.iloc[1].open else '-'
 
             # 3차 필터링
             if ex in ['upbit', 'bithumb'] and now_candle_quote_volume > 300_000_000: # 3억원
@@ -3161,8 +3157,8 @@ class TradingBroker:
     async def send_order(self, PositionEntryIn: PositionEntryIn):
         if self.ex_name == 'bybit':
             res = await self.ex.post_order(PositionEntryIn)
-            if res.get('ret_msg') == 'OK':
-                return True
+            if res.get('retMsg') == 'OK':
+                return res.get('result').get('orderId')
             raise ValueError(res)
         
         elif self.ex_name == 'binance':

@@ -6,6 +6,9 @@ from main import *
 import asyncio
 from apscheduler.schedulers.background import BackgroundScheduler
 from pytz import timezone  # 추가
+import sqlite3
+
+logger = logging.getLogger(__name__)
 
 # from unittest.mock import MagicMock
 
@@ -27,10 +30,61 @@ from pytz import timezone  # 추가
 app = Celery('producer')
 app.config_from_object('celeryconfig')
 
+# RDBMS 연결 함수
+def connect_to_database(db_name="orders.db"):
+    try:
+        conn = sqlite3.connect(db_name)
+        return conn
+    except sqlite3.Error as e:
+        logger.info(f"Database connection failed: {e}")
+        return None
+
+def create_table():
+    try:
+        conn = connect_to_database()
+        cursor = conn.cursor()
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS order (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            orderId TEXT NOT NULL,
+        )
+        """)
+        conn.commit()
+        conn.close()
+    except sqlite3.Error as e:
+        logger.info(f"Table creation failed: {e}")
+    
+# 데이터베이스 작업 함수
+def insert(ticker, orderId):
+    conn = None
+    try:
+        # 연결 시도
+        conn = connect_to_database()
+        cursor = conn.cursor()
+        
+        # 데이터 삽입
+        try:
+            cursor.execute("INSERT INTO order (ticker, orderId) VALUES (?, ?)", (ticker, orderId))
+        except sqlite3.IntegrityError as e:
+            logger.info(f"Data insertion error: {e}")
+        
+        # 커밋
+        conn.commit()
+        
+    except sqlite3.OperationalError as e:
+        logger.info(f"Operational error: {e}")
+        logger.info("Attempting to reconnect...")
+        time.sleep(1)  # 잠시 대기 후 재시도
+        insert()
+    finally:
+        if conn:
+            conn.close()
+
 async def order_handler(data):
     t = TradingDataManager(data.get('exchange'))
 
-    if t.config.name != 'bybit':
+    if data.get('exchange') != 'bybit':
         return False
 
     balance, minOrderQty, price, _ = await asyncio.gather(
@@ -51,7 +105,12 @@ async def order_handler(data):
             tp=tp,
             sl=sl
         )
-        return await TradingBroker('bybit').send_order(order)
+        res = await TradingBroker('bybit').send_order(order)
+
+        if res:
+            insert(data.get('ticker'), res)
+            return True
+
     return False
 
 def handle_message(message):
@@ -79,8 +138,7 @@ def handle_message(message):
                 k.send_telegram(message['data']),
                 order_handler(data)
             ))
-            
-
+        
 def subscribe_to_redis():
     redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
     pubsub = redis_client.pubsub()
@@ -119,6 +177,8 @@ def schedule_tasks():
     group(tasks).apply_async()
 
 if __name__ == "__main__":
+    create_table()
+
     kst = timezone('Asia/Seoul')  # 한국 시간대 설정
     scheduler = BackgroundScheduler(timezone=kst)  # 명시적으로 한국 시간대 설정
     scheduler.add_job(schedule_tasks, 'cron', minute='*/5')  # 5분마다 실행
