@@ -101,7 +101,7 @@ async def order_handler(data):
             symbol=data.get('ticker'),
             side='bid' if data.get('candle_type') == '-' else 'ask',
             order_type='market',
-            qty=minOrderQty*10,
+            qty=float(minOrderQty)*10,
             tp=tp,
             sl=sl
         )
