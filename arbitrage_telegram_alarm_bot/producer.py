@@ -44,10 +44,10 @@ def create_table():
         conn = connect_to_database()
         cursor = conn.cursor()
         cursor.execute("""
-        CREATE TABLE IF NOT EXISTS order (
+        CREATE TABLE IF NOT EXISTS "order" (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker TEXT NOT NULL,
-            orderId TEXT NOT NULL,
+            orderId TEXT NOT NULL
         )
         """)
         conn.commit()
