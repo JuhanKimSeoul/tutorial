@@ -96,7 +96,7 @@ async def order_handler(data):
     tp = price * (1 + 0.01 / 5)
     sl = price * (1 - 0.01 / 5)
 
-    if float(balance) > float(minOrderQty) * float(price) * 10:
+    if float(balance) > float(minOrderQty) * float(price) * 2:
         order = PositionEntryIn(
             symbol=data.get('ticker'),
             side='bid' if data.get('candle_type') == '-' else 'ask',
@@ -132,19 +132,17 @@ def handle_message(message):
                 order_handler(data)
             ))
         except RuntimeError as e:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(asyncio.gather(
-                k.send_telegram(message['data']),
-                order_handler(data)
-            ))
+            logger.info(f"Runtime error: {e}")
         
 def subscribe_to_redis():
     redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
     pubsub = redis_client.pubsub()
     pubsub.subscribe('big_volume_tickers')
 
-    print("Subscribed to big_volume_tickers. Waiting for messages...")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    logger.info("Redis Pub/Sub subscriber started")
     while True:
         message = pubsub.get_message()
         if message:
@@ -184,7 +182,7 @@ if __name__ == "__main__":
     scheduler.add_job(schedule_tasks, 'cron', minute='*/5')  # 5분마다 실행
     scheduler.start()
 
-    print("Scheduler started. Press Ctrl+C to exit.")
+    logger.info(f'Scheduler started: {scheduler.get_jobs()}')
 
     # Redis Pub/Sub 구독을 별도의 스레드에서 실행
     pubsub_thread = threading.Thread(target=subscribe_to_redis)
