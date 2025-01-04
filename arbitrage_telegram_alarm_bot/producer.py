@@ -93,10 +93,14 @@ async def order_handler(data):
         t.get_single_ticker_price(data.get('ticker')),
         t.set_leverage(data.get('ticker'), '5')
     )
-    tp = price * (1 + 0.01 / 5)
-    sl = price * (1 - 0.01 / 5)
+    tp = float(price) * (1 + 0.01 / 5)
+    sl = float(price) * (1 - 0.01 / 5)
 
     if float(balance) > float(minOrderQty) * float(price) * 2:
+        # 최소주문금액이 5USDT가 안되면, 5USDT로 맞춤
+        if float(minOrderQty) * float(price) < 5:
+            minOrderQty = 5 / float(price)
+
         order = PositionEntryIn(
             symbol=data.get('ticker'),
             side='bid' if data.get('candle_type') == '-' else 'ask',
@@ -124,15 +128,19 @@ def handle_message(message):
         k = KimpManager()
         try:
             loop = asyncio.get_event_loop()
+
+            if data.get('exchange') == 'bybit':
+                loop.run_until_complete(order_handler(data))
+
             if loop.is_closed():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-            loop.run_until_complete(asyncio.gather(
-                k.send_telegram(message['data']),
-                order_handler(data)
-            ))
+
+            loop.run_until_complete(k.send_telegram(message['data']))
         except RuntimeError as e:
             logger.info(f"Runtime error: {e}")
+        except Exception as e:
+            logger.info(e)
         
 def subscribe_to_redis():
     redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)

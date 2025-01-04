@@ -1336,6 +1336,7 @@ class BybitManager(ExchangeManager):
         headers = {"accept" : "application/json"}
 
         res = await self.request('get', endpoint, headers, params)
+
         return res['result']['list'][0]['lotSizeFilter']['minOrderQty']
         
     async def get_single_ticker_price(self, symbol):
@@ -3159,22 +3160,23 @@ class TradingBroker:
             res = await self.ex.post_order(PositionEntryIn)
             if res.get('retMsg') == 'OK':
                 return res.get('result').get('orderId')
+            logger.info(PositionEntryIn)
             raise ValueError(res)
         
         elif self.ex_name == 'binance':
-            res = await self.ex.post_order(params)
+            res = await self.ex.post_order(PositionEntryIn)
             if res.get('status') == 'NEW':
                 return res
             raise ValueError(res)
         
         elif self.ex_name == 'upbit':
-            res = await self.ex.post_order(params)
+            res = await self.ex.post_order(PositionEntryIn)
             if res.get('uuid'):
                 return res
             raise ValueError(res)
         
         elif self.ex_name == 'bithumb':
-            res = await self.ex.post_order(params)
+            res = await self.ex.post_order(PositionEntryIn)
             if res.get('uuid'):
                 return res
             raise ValueError(res)
