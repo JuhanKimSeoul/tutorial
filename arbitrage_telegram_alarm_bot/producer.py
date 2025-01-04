@@ -33,21 +33,21 @@ async def order_handler(data):
     if t.config.name != 'bybit':
         return False
 
-    balance, minOrderQty, price = await asyncio.gather(
+    balance, minOrderQty, price, _ = await asyncio.gather(
         t.get_balance(),
         t.get_min_order_qty(data.get('ticker')),
         t.get_single_ticker_price(data.get('ticker')),
-        t.set_leverage(data.get('ticker'), '2')
+        t.set_leverage(data.get('ticker'), '5')
     )
-    tp = price * (1 + 0.02)
-    sl = price * (1 - 0.02)
+    tp = price * (1 + 0.01 / 5)
+    sl = price * (1 - 0.01 / 5)
 
-    if float(balance) > float(minOrderQty) * float(price):
+    if float(balance) > float(minOrderQty) * float(price) * 10:
         order = PositionEntryIn(
             symbol=data.get('ticker'),
             side='bid' if data.get('candle_type') == '-' else 'ask',
             order_type='market',
-            qty=minOrderQty,
+            qty=minOrderQty*10,
             tp=tp,
             sl=sl
         )
