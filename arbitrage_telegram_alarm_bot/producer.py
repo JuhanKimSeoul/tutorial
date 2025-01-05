@@ -93,8 +93,14 @@ async def order_handler(data):
         t.get_single_ticker_price(data.get('ticker')),
         t.set_leverage(data.get('ticker'), '5')
     )
-    tp = float(price) * (1 + 0.01 / 5)
-    sl = float(price) * (1 - 0.01 / 5)
+
+    # 음봉이면, 매수주문이므로 TP는 높게, SL은 낮게
+    if data.get('candle_type') == '-':
+        tp = float(price) * (1 + 0.01 / 5)
+        sl = float(price) * (1 - 0.01 / 5)
+    else:
+        tp = float(price) * (1 - 0.01 / 5)
+        sl = float(price) * (1 + 0.01 / 5)
 
     if float(balance) > float(minOrderQty) * float(price) * 2:
         # 최소주문금액이 5USDT가 안되면, 5USDT로 맞춤
