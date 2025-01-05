@@ -65,7 +65,7 @@ def insert(ticker, orderId):
         
         # 데이터 삽입
         try:
-            cursor.execute("INSERT INTO order (ticker, orderId) VALUES (?, ?)", (ticker, orderId))
+            cursor.execute("INSERT INTO 'order' (ticker, orderId) VALUES (?, ?)", (ticker, orderId))
         except sqlite3.IntegrityError as e:
             logger.info(f"Data insertion error: {e}")
         
@@ -76,7 +76,7 @@ def insert(ticker, orderId):
         logger.info(f"Operational error: {e}")
         logger.info("Attempting to reconnect...")
         time.sleep(1)  # 잠시 대기 후 재시도
-        insert()
+        insert(ticker, orderId)
     finally:
         if conn:
             conn.close()
@@ -93,6 +93,12 @@ async def order_handler(data):
         t.get_single_ticker_price(data.get('ticker')),
         t.set_leverage(data.get('ticker'), '5')
     )
+
+    # 현재 포지션을 가지고 있으면, 매수/매도 주문을 하지 않음
+    positions = await t.get_all_position()
+    for position in positions:
+        if position.get('symbol') == data.get('ticker'):
+            return False
 
     # 음봉이면, 매수주문이므로 TP는 높게, SL은 낮게
     if data.get('candle_type') == '-':
