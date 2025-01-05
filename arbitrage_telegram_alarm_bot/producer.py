@@ -139,22 +139,23 @@ async def handle_message_async(**kwargs):
 def handle_message(message):
     if message['type'] == 'message':
         data = json.loads(message['data'])
+        logger.info(data)
 
         if data.get('exchange') != 'bybit':
             return False
         
-        # 결과 처리 로직 추가
-        k = KimpManager()
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+            logger.info(loop)
             data2 = message['data']
             loop.run_until_complete(handle_message_async(data1=data, data2=data2))
         except RuntimeError as e:   
             logger.info(f"Runtime error: {e}")
         except Exception as e:
-            logger.info(e)
+            logger.info(f"Error: {e}")
         finally:
+            logger.info("Closing the loop")
             loop.close()
         
 def subscribe_to_redis():
