@@ -10,6 +10,9 @@ import sqlite3
 
 logger = logging.getLogger(__name__)
 
+# 텔레그램을 위한 쓰레드 로컬 객체 생성
+thread_local = threading.local()
+
 # from unittest.mock import MagicMock
 
 # # Mock Update 객체 생성
@@ -136,27 +139,30 @@ async def handle_message_async(**kwargs):
         k.send_telegram(kwargs.get('data2'))
     )
 
+def get_event_loop():
+    if not hasattr(thread_local, 'loop'):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        thread_local.loop = loop
+    return thread_local.loop
+
 def handle_message(message):
     if message['type'] == 'message':
         data = json.loads(message['data'])
         logger.info(data)
 
-        if data.get('exchange') != 'bybit':
-            return False
-        
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            logger.info(loop)
-            data2 = message['data']
-            loop.run_until_complete(handle_message_async(data1=data, data2=data2))
+            loop = get_event_loop()
+        
+            if data.get('exchange') != 'bybit':
+                k = KimpManager()
+                return loop.run_until_complete(k.send_telegram(message['data']))
+        
+            loop.run_until_complete(handle_message_async(data1=data, data2=message['data']))
         except RuntimeError as e:   
             logger.info(f"Runtime error: {e}")
         except Exception as e:
             logger.info(f"Error: {e}")
-        finally:
-            logger.info("Closing the loop")
-            loop.close()
         
 def subscribe_to_redis():
     redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
