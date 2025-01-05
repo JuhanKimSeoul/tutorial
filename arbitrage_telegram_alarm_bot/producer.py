@@ -129,6 +129,13 @@ async def order_handler(data):
 
     return False
 
+async def handle_message_async(**kwargs):
+    k = KimpManager()
+    await asyncio.gather(
+        order_handler(kwargs.get('data1')),
+        k.send_telegram(kwargs.get('data2'))
+    )
+
 def handle_message(message):
     if message['type'] == 'message':
         data = json.loads(message['data'])
@@ -136,16 +143,14 @@ def handle_message(message):
         if data.get('exchange') != 'bybit':
             return False
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
         # 결과 처리 로직 추가
         k = KimpManager()
         try:
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(order_handler(data))
-            loop.run_until_complete(k.send_telegram(message['data']))
-        except RuntimeError as e:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            data2 = message['data']
+            loop.run_until_complete(handle_message_async(data1=data, data2=data2))
+        except RuntimeError as e:   
             logger.info(f"Runtime error: {e}")
         except Exception as e:
             logger.info(e)
