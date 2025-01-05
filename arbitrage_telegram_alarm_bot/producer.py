@@ -97,19 +97,24 @@ async def order_handler(data):
         t.set_leverage(data.get('ticker'), '5')
     )
 
-    # 현재 포지션을 가지고 있으면, 매수/매도 주문을 하지 않음
+    # 음봉이면, 매수주문이므로 TP는 높게, SL은 낮게
+    if data.get('candle_type') == '-':
+        tp = float(price) * (1 + 0.02 / 5)
+        sl = float(price) * (1 - 0.1 / 5)
+    else:
+        tp = float(price) * (1 - 0.02 / 5)
+        sl = float(price) * (1 + 0.1 / 5)
+
+    # 피라미딩은 가능하나, 다른 방향으로 포지션 진입 불가
     positions = await t.get_all_position()
     for position in positions:
         if position.get('symbol') == data.get('ticker'):
-            return False
-
-    # 음봉이면, 매수주문이므로 TP는 높게, SL은 낮게
-    if data.get('candle_type') == '-':
-        tp = float(price) * (1 + 0.01 / 5)
-        sl = float(price) * (1 - 0.01 / 5)
-    else:
-        tp = float(price) * (1 - 0.01 / 5)
-        sl = float(price) * (1 + 0.01 / 5)
+            if position.get('side') == 'Buy' and data.get('candle_type') == '+':
+                return False
+            elif position.get('side') == 'Sell' and data.get('candle_type') == '-':
+                return False
+            else:
+                return False
 
     if float(balance) > float(minOrderQty) * float(price) * 2:
         # 최소주문금액이 5USDT가 안되면, 5USDT로 맞춤
