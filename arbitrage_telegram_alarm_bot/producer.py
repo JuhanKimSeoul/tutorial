@@ -127,34 +127,29 @@ def handle_message(message):
     if message['type'] == 'message':
         data = json.loads(message['data'])
 
-        if data.get('exchange') == 'bybit':
-            asyncio.run(order_handler(data))
+        if data.get('exchange') != 'bybit':
+            return False
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
         # 결과 처리 로직 추가
         k = KimpManager()
         try:
             loop = asyncio.get_event_loop()
-
-            if data.get('exchange') == 'bybit':
-                loop.run_until_complete(order_handler(data))
-
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-
+            loop.run_until_complete(order_handler(data))
             loop.run_until_complete(k.send_telegram(message['data']))
         except RuntimeError as e:
             logger.info(f"Runtime error: {e}")
         except Exception as e:
             logger.info(e)
+        finally:
+            loop.close()
         
 def subscribe_to_redis():
     redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
     pubsub = redis_client.pubsub()
     pubsub.subscribe('big_volume_tickers')
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
 
     logger.info("Redis Pub/Sub subscriber started")
     while True:
