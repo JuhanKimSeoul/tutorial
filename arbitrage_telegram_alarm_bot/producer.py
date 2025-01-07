@@ -134,31 +134,47 @@ async def order_handler(data):
         t.set_leverage(data.get('ticker'), '5')
     )
 
-    # 음봉이면, 매수주문이므로 TP는 높게, SL은 낮게
-    if data.get('candle_type') == '-':
-        tp = float(price) * (1 + 0.02 / 5)
-        sl = float(price) * (1 - 0.1 / 5)
-    else:
-        tp = float(price) * (1 - 0.02 / 5)
-        sl = float(price) * (1 + 0.1 / 5)
-
+    pyramiding = False
+    avg_price = 0
+    size = 0
     # 피라미딩은 가능하나, 다른 방향으로 포지션 진입 불가
     positions = await t.get_all_position()
     for position in positions:
-        if position.get('symbol') == data.get('ticker'):
+        if position.get('symbol') == data.get('ticker') + 'USDT':
             if position.get('side') == 'Buy' and data.get('candle_type') == '+':
+                size = position.get('size')
+                avg_price = position.get('avgPrice')
+                pyramiding = True
                 return False
             elif position.get('side') == 'Sell' and data.get('candle_type') == '-':
+                pyramiding = True
+                size = position.get('size')
+                avg_price = position.get('avgPrice')
                 return False
-            else:
-                return False
-
+            
     logger.info(f"ticker: {data.get('ticker')}, Balance: {balance}, MinOrderQty: {minOrderQty}, Price: {price}")
 
     if float(balance) > float(minOrderQty) * float(price) * 2:
         # 최소주문금액이 5USDT가 안되면, 5USDT로 맞춤
         if float(minOrderQty) * float(price) < 5:
             minOrderQty = 5 / float(price)
+
+        # 현재봉이 양봉이면, short진입이므로 TP가 -, SL가 +
+        # 피라미딩이면, 기존 포지션의 size와 avg_price를 가져와서 tp, sl을 조정
+        if data.get('candle_type') == '+':
+            if pyramiding:
+                tp = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 - 0.02 / 5)
+                sl = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 + 0.1 / 5)
+            else:
+                tp = float(price) * (1 - 0.02 / 5)
+                sl = float(price) * (1 + 0.1 / 5)
+        else:
+            if pyramiding:
+                tp = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 + 0.02 / 5)
+                sl = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 - 0.1 / 5)
+            else:
+                tp = float(price) * (1 + 0.02 / 5)
+                sl = float(price) * (1 - 0.1 / 5)
 
         order = PositionEntryIn(
             symbol=data.get('ticker'),
