@@ -57,6 +57,43 @@ def create_table():
         conn.close()
     except sqlite3.Error as e:
         logger.info(f"Table creation failed: {e}")
+
+def migrate_table():
+    try:
+        conn = connect_to_database()
+        cursor = conn.cursor()
+        
+        # Backup existing data
+        cursor.execute("CREATE TABLE IF NOT EXISTS order_backup AS SELECT * FROM 'order'")
+        
+        # Drop existing table
+        cursor.execute("DROP TABLE IF EXISTS 'order'")
+        
+        # Create new table with timestamp
+        cursor.execute("""
+        CREATE TABLE "order" (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            orderId TEXT NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        
+        # Restore data with current timestamp
+        cursor.execute("""
+        INSERT INTO 'order' (ticker, orderId, timestamp)
+        SELECT ticker, orderId, NULL
+        FROM order_backup
+        """)
+        
+        # Drop backup table
+        cursor.execute("DROP TABLE IF EXISTS order_backup")
+        
+        conn.commit()
+        conn.close()
+        logger.info("Table migration completed successfully")
+    except sqlite3.Error as e:
+        logger.error(f"Table migration failed: {e}")
     
 # 데이터베이스 작업 함수
 def insert(ticker, orderId):
@@ -68,7 +105,7 @@ def insert(ticker, orderId):
         
         # 데이터 삽입
         try:
-            cursor.execute("INSERT INTO 'order' (ticker, orderId) VALUES (?, ?)", (ticker, orderId))
+            cursor.execute("INSERT INTO 'order' (ticker, orderId, timestamp) VALUES (?, ?, datetime('now'))", (ticker, orderId))
         except sqlite3.IntegrityError as e:
             logger.info(f"Data insertion error: {e}")
         
@@ -115,6 +152,8 @@ async def order_handler(data):
                 return False
             else:
                 return False
+
+    logger.info(f"ticker: {data.get('ticker')}, Balance: {balance}, MinOrderQty: {minOrderQty}, Price: {price}")
 
     if float(balance) > float(minOrderQty) * float(price) * 2:
         # 최소주문금액이 5USDT가 안되면, 5USDT로 맞춤
