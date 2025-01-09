@@ -82,8 +82,8 @@ def migrate_table():
         
         # Restore data with current timestamp
         cursor.execute("""
-        INSERT INTO 'order' ('bybit', ticker, orderId, timestamp)
-        SELECT ticker, orderId, timestamp
+        INSERT INTO 'order' (exchange, ticker, orderId, timestamp)
+        SELECT 'bybit', ticker, orderId, timestamp
         FROM order_backup
         """)
         
