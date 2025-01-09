@@ -73,6 +73,7 @@ def migrate_table():
         cursor.execute("""
         CREATE TABLE "order" (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            exchange TEXT NOT NULL,
             ticker TEXT NOT NULL,
             orderId TEXT NOT NULL,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -81,8 +82,8 @@ def migrate_table():
         
         # Restore data with current timestamp
         cursor.execute("""
-        INSERT INTO 'order' (ticker, orderId, timestamp)
-        SELECT ticker, orderId, NULL
+        INSERT INTO 'order' ('bybit', ticker, orderId, timestamp)
+        SELECT ticker, orderId, timestamp
         FROM order_backup
         """)
         
@@ -96,16 +97,20 @@ def migrate_table():
         logger.error(f"Table migration failed: {e}")
     
 # 데이터베이스 작업 함수
-def insert(ticker, orderId):
+def insert(**kwargs):
     conn = None
     try:
         # 연결 시도
         conn = connect_to_database()
         cursor = conn.cursor()
         
+        exchange = kwargs.get('exchange')
+        ticker = kwargs.get('ticker')
+        orderId = kwargs.get('orderId')
+
         # 데이터 삽입
         try:
-            cursor.execute("INSERT INTO 'order' (ticker, orderId, timestamp) VALUES (?, ?, datetime('now'))", (ticker, orderId))
+            cursor.execute("INSERT INTO 'order' (exchange, ticker, orderId, timestamp) VALUES (?, ?, ?, datetime('now'))", (exchange, ticker, orderId))
         except sqlite3.IntegrityError as e:
             logger.info(f"Data insertion error: {e}")
         
@@ -116,16 +121,44 @@ def insert(ticker, orderId):
         logger.info(f"Operational error: {e}")
         logger.info("Attempting to reconnect...")
         time.sleep(1)  # 잠시 대기 후 재시도
-        insert(ticker, orderId)
+        insert(**kwargs)
     finally:
         if conn:
             conn.close()
 
-async def order_handler(data):
+async def upbit_order_handler(data):
     t = TradingDataManager(data.get('exchange'))
 
-    if data.get('exchange') != 'bybit':
-        return False
+    balance, minOrderQty, price = await asyncio.gather(
+        t.get_balance(),
+        t.get_min_order_qty(data.get('ticker')),
+        t.get_single_ticker_price(data.get('ticker'))
+    )
+
+    logger.info(f"ticker: {data.get('ticker')}, Balance: {balance}, MinOrderQty: {minOrderQty}, Price: {price}")
+
+    # 업비트는 선물이 없으므로, 양봉일 때에만 진입
+    if data.get('candle_type') == '-':
+        return
+    
+    # 10억 이하 거래량은 제외
+    if data.get('quote_volume') < 1_000_000_000:
+        return
+    
+    # 테스트용 최소주문금액
+    minorder_amt = 10000
+    
+    order = PositionEntryIn(
+        symbol=data.get('ticker'),
+        side='bid',
+        order_type='market',
+        qty=minorder_amt,
+    )
+
+    return await TradingBroker('upbit').send_order(order)
+
+async def bybit_order_handler(data):
+    t = TradingDataManager(data.get('exchange'))
 
     balance, minOrderQty, price, _ = await asyncio.gather(
         t.get_balance(),
@@ -184,11 +217,19 @@ async def order_handler(data):
             tp=tp,
             sl=sl
         )
-        res = await TradingBroker('bybit').send_order(order)
 
-        if res:
-            insert(data.get('ticker'), res)
-            return True
+    return await TradingBroker('bybit').send_order(order)
+
+async def order_handler(data):
+    if data.get('exchange') == 'bybit':
+        res = await bybit_order_handler(data)
+
+    if data.get('exchange') == 'upbit':
+        res = await upbit_order_handler(data)
+    
+    if res:
+        insert(data.get('exchange'), data.get('ticker'), res)
+        return True
 
     return False
 
@@ -214,7 +255,7 @@ def handle_message(message):
         try:
             loop = get_event_loop()
         
-            if data.get('exchange') != 'bybit':
+            if data.get('exchange') not in ['bybit', 'upbit']:
                 k = KimpManager()
                 return loop.run_until_complete(k.send_telegram(message['data']))
         

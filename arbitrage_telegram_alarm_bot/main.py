@@ -103,6 +103,7 @@ class UpbitAPIConfig(ExchangeAPIConfig):
     balance_url         = "/v1/accounts"
     order_url           = "/v1/orders"
     withdraw_info_url   = "/v1/withdraws/chance"
+    ticker_info_url     = "/v1/orders/chance"
     interval_enum       = [1,3,5,10,15,30,60,240]
     limit               = 200
     fee_rate            = Fees.UPBIT.value
@@ -139,6 +140,10 @@ class UpbitAPIConfig(ExchangeAPIConfig):
                 'currency': kwargs.get('currency'),
                 'net_type': kwargs.get('net_type')
             }    
+        elif url == self.ticker_info_url:
+            return {
+                'market': kwargs.get('symbol')
+            }
         else:
             return {}
     
@@ -548,6 +553,31 @@ class UpbitManager(ExchangeManager):
 
         return await self.request('get', endpoint, headers, params)
 
+    async def get_min_order_qty(self, symbol):
+        endpoint = self.config.ticker_info_url
+        params = self.config.get_params(endpoint, symbol=self.ticker_mapper(symbol))
+        query_string = unquote(urlencode(params, doseq=True)).encode("utf-8")
+
+        m = hashlib.sha512()
+        m.update(query_string)
+        query_hash = m.hexdigest()
+
+        payload = {
+            'access_key': upbit_access_key,
+            'nonce': str(uuid.uuid4()),
+            'query_hash': query_hash,
+            'query_hash_alg': 'SHA512', 
+        }
+
+        jwt_token = jwt.encode(payload, upbit_secret_key)
+        authorization = 'Bearer {}'.format(jwt_token)
+        headers = {
+            'Authorization': authorization,
+        }
+        res = await self.request('get', endpoint, headers, params)
+
+        return res['market']['bid']['min_total']
+    
     async def post_order(self, PositionEntryIn: PositionEntryIn):
         '''
             시장가 매수시 params ex)
@@ -799,7 +829,8 @@ class UpbitManager(ExchangeManager):
 
         return [{'symbol': item['currency'], \
                  'side': 'bid', \
-                 'size': item['balance']} \
+                 'size': item['balance'], 
+                 'avg_buy_price': item['avg_buy_price']} \
                  for item in res]
     
 class BithumbManager(ExchangeManager):
