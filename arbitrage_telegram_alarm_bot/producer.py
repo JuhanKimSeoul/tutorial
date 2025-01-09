@@ -228,7 +228,7 @@ async def order_handler(data):
         res = await upbit_order_handler(data)
     
     if res:
-        insert(data.get('exchange'), data.get('ticker'), res)
+        insert(exchange=data.get('exchange'), ticker=data.get('ticker'), orderId=res)
         return True
 
     return False

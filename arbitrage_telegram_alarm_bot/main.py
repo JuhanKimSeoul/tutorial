@@ -3203,13 +3203,13 @@ class TradingBroker:
         elif self.ex_name == 'upbit':
             res = await self.ex.post_order(PositionEntryIn)
             if res.get('uuid'):
-                return res
+                return res.get('uuid')
             raise ValueError(res)
         
         elif self.ex_name == 'bithumb':
             res = await self.ex.post_order(PositionEntryIn)
             if res.get('uuid'):
-                return res
+                return res.get('uuid')
             raise ValueError(res)
     
         return ValueError('Invalid exchange name')
