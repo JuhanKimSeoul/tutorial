@@ -597,6 +597,9 @@ class UpbitManager(ExchangeManager):
         '''
         endpoint = self.config.order_url
         params = PositionEntryMapper.to_exchange(PositionEntryIn, self.config.name).not_None_to_dict()
+        params['market'] = self.ticker_mapper(params['market'])
+        
+        logger.info(f"Upbit order params: {json.dumps(params, indent=4)}")
 
         query_string = unquote(urlencode(params, doseq=True)).encode("utf-8")
 
@@ -1280,7 +1283,9 @@ class BybitManager(ExchangeManager):
         endpoint = self.config.order_url
         params: BybitPositionEntryIn = PositionEntryMapper.to_exchange(PositionEntryIn, self.config.name).not_None_to_dict()
         params['symbol'] = self.ticker_mapper(params['symbol'])
-        print(json.dumps(params, indent=4))
+
+        logger.info(f"Bybit order params: {json.dumps(params, indent=4)}")
+
         timestamp = str(int(time.time() * 1000))
         recv_window = "5000"
 
