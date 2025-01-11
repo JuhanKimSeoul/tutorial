@@ -75,6 +75,7 @@ def migrate_table():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             exchange TEXT NOT NULL,
             ticker TEXT NOT NULL,
+            quoteVolume REAL NOT NULL,
             orderId TEXT NOT NULL,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -82,8 +83,8 @@ def migrate_table():
         
         # Restore data with current timestamp
         cursor.execute("""
-        INSERT INTO 'order' (exchange, ticker, orderId, timestamp)
-        SELECT 'bybit', ticker, orderId, timestamp
+        INSERT INTO 'order' (exchange, quoteVolume, ticker, orderId, timestamp)
+        SELECT 'bybit', 0, ticker, orderId, timestamp
         FROM order_backup
         """)
         
@@ -107,10 +108,11 @@ def insert(**kwargs):
         exchange = kwargs.get('exchange')
         ticker = kwargs.get('ticker')
         orderId = kwargs.get('orderId')
+        quoteVolume = kwargs.get('quoteVolume')
 
         # 데이터 삽입
         try:
-            cursor.execute("INSERT INTO 'order' (exchange, ticker, orderId, timestamp) VALUES (?, ?, ?, datetime('now'))", (exchange, ticker, orderId))
+            cursor.execute("INSERT INTO 'order' (exchange, ticker, quoteVolume, orderId, timestamp) VALUES (?, ?, ?, ?, datetime('now', '+9 hours'))", (exchange, ticker, orderId, quoteVolume))
         except sqlite3.IntegrityError as e:
             logger.info(f"Data insertion error: {e}")
         
@@ -135,8 +137,6 @@ async def upbit_order_handler(data):
         t.get_single_ticker_price(data.get('ticker'))
     )
 
-    logger.info(f"ticker: {data.get('ticker')}, Balance: {balance}, MinOrderQty: {minOrderQty}, Price: {price}")
-
     # 업비트는 선물이 없으므로, 양봉일 때에만 진입
     if data.get('candle_type') == '-':
         return
@@ -144,6 +144,8 @@ async def upbit_order_handler(data):
     # 10억 이하 거래량은 제외
     if data.get('quote_volume') < 1_000_000_000:
         return
+    
+    logger.info(f"ticker: {data.get('ticker')}, Balance: {balance}, MinOrderQty: {minOrderQty}, Price: {price}")
     
     # 테스트용 최소주문금액
     minorder_amt = 10000
@@ -185,8 +187,6 @@ async def bybit_order_handler(data):
                 avg_price = position.get('avgPrice')
                 return False
             
-    logger.info(f"ticker: {data.get('ticker')}, Balance: {balance}, MinOrderQty: {minOrderQty}, Price: {price}")
-
     if float(balance) > float(minOrderQty) * float(price) * 2:
         # 최소주문금액이 5USDT가 안되면, 5USDT로 맞춤
         if float(minOrderQty) * float(price) < 5:
@@ -199,15 +199,17 @@ async def bybit_order_handler(data):
                 tp = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 - 0.02 / 5)
                 sl = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 + 0.1 / 5)
             else:
-                tp = float(price) * (1 - 0.02 / 5)
+                tp = float(price) * (1 - 0.05 / 5)
                 sl = float(price) * (1 + 0.1 / 5)
         else:
             if pyramiding:
                 tp = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 + 0.02 / 5)
                 sl = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 - 0.1 / 5)
             else:
-                tp = float(price) * (1 + 0.02 / 5)
+                tp = float(price) * (1 + 0.05 / 5)
                 sl = float(price) * (1 - 0.1 / 5)
+
+        logger.debug(f"ticker: {data.get('ticker')}, Balance: {balance}, MinOrderQty: {minOrderQty}, Price: {price}")
 
         order = PositionEntryIn(
             symbol=data.get('ticker'),
@@ -217,6 +219,8 @@ async def bybit_order_handler(data):
             tp=tp,
             sl=sl
         )
+
+        logger.info(f"Order: {json.dumps(order.to_dict(), indent=4)}")
 
     return await TradingBroker('bybit').send_order(order)
 
@@ -228,7 +232,7 @@ async def order_handler(data):
         res = await upbit_order_handler(data)
     
     if res:
-        insert(exchange=data.get('exchange'), ticker=data.get('ticker'), orderId=res)
+        insert(exchange=data.get('exchange'), ticker=data.get('ticker'), quoteVolume=data.get('quote_volume'), orderId=res)
         return True
 
     return False
