@@ -104,6 +104,7 @@ class UpbitAPIConfig(ExchangeAPIConfig):
     order_url           = "/v1/orders"
     withdraw_info_url   = "/v1/withdraws/chance"
     ticker_info_url     = "/v1/orders/chance"
+    closed_order_url    = "/v1/orders/closed"
     interval_enum       = [1,3,5,10,15,30,60,240]
     limit               = 200
     fee_rate            = Fees.UPBIT.value
@@ -836,6 +837,32 @@ class UpbitManager(ExchangeManager):
                  'avg_buy_price': item['avg_buy_price']} \
                  for item in res]
     
+    async def get_closed_orders(self, symbol):
+        endpoint = self.config.closed_order_url
+        params = {
+            'market': self.ticker_mapper(symbol),
+        }
+
+        query_string = unquote(urlencode(params, doseq=True)).encode("utf-8")
+        m = hashlib.sha512()
+        m.update(query_string)
+        query_hash = m.hexdigest()
+
+        payload = {
+            'access_key': upbit_access_key,
+            'nonce': str(uuid.uuid4()),
+            'query_hash': query_hash,
+            'query_hash_alg': 'SHA512',
+        }
+
+        jwt_token = jwt.encode(payload, upbit_secret_key)
+        authorization = 'Bearer {}'.format(jwt_token)
+        headers = {
+            'Authorization': authorization,
+        }
+
+        return await self.request('get', endpoint, headers, params)
+
 class BithumbManager(ExchangeManager):
     def __init__(self):
         super().__init__()

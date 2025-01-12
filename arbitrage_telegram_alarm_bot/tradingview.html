@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TradingView Chart</title>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  </head>
+  <body></body>
+  <script>
+    var chart = LightweightCharts.createChart(document.body, {
+      width: 600,
+      height: 300,
+    });
+    chart.applyOptions({
+      timeScale: {
+        timeVisible: true, // 시간을 표시
+        secondsVisible: false, // 초는 제외
+      },
+    });
+
+    var candleSeries = chart.addCandlestickSeries();
+
+    const url = "https://api.upbit.com/v1/candles/minutes/5"; // 여기에 올바른 API 엔드포인트를 입력하세요
+
+    var candles = [];
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function fetchCandles(market, count, to) {
+      const batchSize = 200;
+      let allData = [];
+
+      for (let i = 0; i < Math.ceil(count / batchSize); i++) {
+        let ISOString = new Date(to).toISOString().split(".")[0];
+        const response = await fetch(
+          `${url}?market=${market}&count=${Math.min(
+            batchSize,
+            count - i * batchSize
+          )}&to=${ISOString}`
+        );
+        const data = await response.json();
+        allData = allData.concat(data);
+        currentFrom = new Date(data[data.length - 1].candle_date_time_utc);
+        currentTo = new Date(data[0].candle_date_time_utc);
+        to = currentFrom.getTime() - 5 * 60 * 1000; // 5분 봉이므로 5분을 빼줍니다.
+        await sleep(100); // 요청 제한을 피하기 위해 100ms 대기
+      }
+
+      return allData.map((candle) => {
+        const date = new Date(candle.candle_date_time_kst);
+        return {
+          time: Math.floor(date.getTime() / 1000),
+          open: candle.opening_price,
+          high: candle.high_price,
+          low: candle.low_price,
+          close: candle.trade_price,
+        };
+      });
+    }
+
+    async function fetchInitialData() {
+      const market = "KRW-BTC";
+      const count = 8640; // 5분봉 288개 (1일)
+      const now = Date.now(); // 현재 시각 기준
+      const candles = await fetchCandles(market, count, now);
+      return candles.reverse();
+    }
+
+    async function fetchLatestCandle() {
+      const market = "KRW-BTC";
+      const count = 1; // 가장 최근의 1개 봉만 가져옴
+      const now = Date.now(); // 현재 시각 기준
+      const latestCandle = await fetchCandles(market, count, now);
+      return latestCandle[0];
+    }
+
+    async function initializeChartWithInitialData() {
+      candles = await fetchInitialData();
+      candleSeries.setData(candles);
+
+      // 실시간 업데이트를 위한 setInterval 설정
+      setInterval(async () => {
+        const latestCandle = await fetchLatestCandle();
+        const lastCandle = candles[candles.length - 1];
+
+        if (latestCandle.time > lastCandle.time) {
+          // 새로운 봉이 생성된 경우
+          candles.push(latestCandle);
+        } else {
+          // 현재 봉이 업데이트된 경우
+          candles[candles.length - 1] = latestCandle;
+        }
+
+        candleSeries.setData(candles);
+      }, 1000); // 1초마다 업데이트
+    }
+
+    // 차트 초기화 호출
+    initializeChartWithInitialData();
+
+    // 4. 마커 추가 (특정 봉에 표시)
+    const markers = [
+      {
+        time: 1736640000, // 마커를 표시할 날짜
+        position: "aboveBar", // 'aboveBar' 또는 'belowBar'
+        color: "red",
+        shape: "arrowDown", // 'circle', 'square', 'arrowUp', 'arrowDown'
+        text: "Significant drop", // 마커 텍스트
+      },
+      {
+        time: 1736700000,
+        position: "belowBar",
+        color: "green",
+        shape: "arrowUp",
+        text: "Great rebound",
+      },
+    ];
+
+    candleSeries.setMarkers(markers);
+  </script>
+</html>
