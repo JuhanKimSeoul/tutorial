@@ -551,7 +551,6 @@ class UpbitManager(ExchangeManager):
         }
 
         res = await self.request('get', self.config.balance_url, headers)
-        logger.info(res)
         return float([ i.get('balance', 0) for i in res if i.get('currency') == symbol][0])
 
     async def get_kline(self, symbol, interval, limit: int = 200):

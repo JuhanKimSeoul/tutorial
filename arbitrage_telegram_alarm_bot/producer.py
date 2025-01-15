@@ -49,8 +49,12 @@ def create_table():
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS "order" (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            exchange TEXT NOT NULL,
             ticker TEXT NOT NULL,
-            orderId TEXT NOT NULL
+            quoteVolume REAL NOT NULL,
+            orderId TEXT NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            position TEXT NOT NULL,  -- 'long' or 'short'
         )
         """)
         conn.commit()
@@ -69,7 +73,7 @@ def migrate_table():
         # Drop existing table
         cursor.execute("DROP TABLE IF EXISTS 'order'")
         
-        # Create new table with timestamp
+        # Create new table with timestamp, long/short status, and average price
         cursor.execute("""
         CREATE TABLE "order" (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,14 +81,15 @@ def migrate_table():
             ticker TEXT NOT NULL,
             quoteVolume REAL NOT NULL,
             orderId TEXT NOT NULL,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            position TEXT NOT NULL,  -- 'long' or 'short'
         )
         """)
         
-        # Restore data with current timestamp
+        # Restore data with current timestamp, default position as 'long', and avgPrice as 0
         cursor.execute("""
-        INSERT INTO 'order' (exchange, quoteVolume, ticker, orderId, timestamp)
-        SELECT 'bybit', 0, ticker, orderId, timestamp
+        INSERT INTO 'order' (exchange, quoteVolume, ticker, orderId, timestamp, position)
+        SELECT 'bybit', 0, ticker, orderId, timestamp, 'undefined', 0, 'open'
         FROM order_backup
         """)
         
@@ -109,10 +114,11 @@ def insert(**kwargs):
         ticker = kwargs.get('ticker')
         orderId = kwargs.get('orderId')
         quoteVolume = kwargs.get('quoteVolume')
+        position = kwargs.get('position')
 
         # 데이터 삽입
         try:
-            cursor.execute("INSERT INTO 'order' (exchange, ticker, quoteVolume, orderId, timestamp) VALUES (?, ?, ?, ?, datetime('now', '+9 hours'))", (exchange, ticker, orderId, quoteVolume))
+            cursor.execute("INSERT INTO 'order' (exchange, ticker, quoteVolume, orderId, timestamp, position) VALUES (?, ?, ?, ?, datetime('now', '+9 hours'), ?, ?, ?)", (exchange, ticker, quoteVolume, orderId, position))
         except sqlite3.IntegrityError as e:
             logger.info(f"Data insertion error: {e}")
         
@@ -132,7 +138,7 @@ async def upbit_order_handler(data):
     t = TradingDataManager(data.get('exchange'))
 
     balance, minOrderQty, price = await asyncio.gather(
-        t.get_balance(),
+        t.get_all_position_info(),
         t.get_min_order_qty(data.get('ticker')),
         t.get_single_ticker_price(data.get('ticker'))
     )
@@ -145,10 +151,22 @@ async def upbit_order_handler(data):
     if data.get('quote_volume') < 1_000_000_000:
         return
     
-    logger.info(f"ticker: {data.get('ticker')}, Balance: {balance}, MinOrderQty: {minOrderQty}, Price: {price}")
+    bef_size = None
+    bef_avg_price = None
+    for pos in balance:
+        if pos.get('symbol') == data.get('ticker'):
+            bef_size = pos.get('size')
+            bef_avg_price = pos.get('avg_buy_price')
+            break
+    
+    logger.info(f"ticker: {data.get('ticker')}, \
+                  bef_size: {bef_size}, \
+                  bef_avg_price: {bef_avg_price}, \
+                  MinOrderQty: {minOrderQty}, \
+                  Price: {price}")
     
     # 테스트용 최소주문금액
-    minorder_amt = 10000
+    minorder_amt = 5100
     
     order = PositionEntryIn(
         symbol=data.get('ticker'),
@@ -232,7 +250,11 @@ async def order_handler(data):
         res = await upbit_order_handler(data)
     
     if res:
-        insert(exchange=data.get('exchange'), ticker=data.get('ticker'), quoteVolume=data.get('quote_volume'), orderId=res)
+        insert(exchange=data.get('exchange'), \
+               ticker=data.get('ticker'), \
+               quoteVolume=data.get('quote_volume'), \
+               orderId=res, \
+               position='long' if data.get('candle_type') == '-' else 'short')
         return True
 
     return False
