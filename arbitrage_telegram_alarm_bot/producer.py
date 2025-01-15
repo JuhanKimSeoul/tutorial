@@ -89,7 +89,7 @@ def migrate_table():
         # Restore data with current timestamp, default position as 'long', and avgPrice as 0
         cursor.execute("""
         INSERT INTO 'order' (exchange, ticker, quoteVolume, orderId, timestamp, position)
-        SELECT exchange, 0, ticker, orderId, timestamp, orderId, timestamp, 'undefined'
+        SELECT exchange, ticker, 0, orderId, timestamp, 'undefined'
         FROM order_backup
         """)
         
