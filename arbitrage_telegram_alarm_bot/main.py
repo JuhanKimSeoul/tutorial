@@ -105,6 +105,7 @@ class UpbitAPIConfig(ExchangeAPIConfig):
     withdraw_info_url   = "/v1/withdraws/chance"
     ticker_info_url     = "/v1/orders/chance"
     closed_order_url    = "/v1/orders/closed"
+    order_history_url   = "/v1/orders/uuids"
     interval_enum       = [1,3,5,10,15,30,60,240]
     limit               = 200
     fee_rate            = Fees.UPBIT.value
@@ -256,6 +257,8 @@ class BybitAPIConfig(ExchangeAPIConfig):
     ticker_info_url     = "/v5/market/instruments-info?category=linear"
     position_info_url   = "/v5/position/list"
     recent_trade_url    = "/v5/market/recent-trade"
+    funding_rate_url    = "/v5/market/funding/history"
+    order_history_url   = "/v5/order/history"
     interval_enum       = [1,3,5,15,30,60,120,240,360,720,'D','W','M']
     orderbook_limit     = 500
     kline_limit         = 1000
@@ -314,6 +317,17 @@ class BybitAPIConfig(ExchangeAPIConfig):
         elif url == self.position_info_url:
             return {
                 'symbol': kwargs.get('symbol')
+            }
+        elif url == self.funding_rate_url:
+            return {
+                'category': 'linear',
+                'symbol': kwargs.get('symbol')
+            }
+        elif url == self.order_history_url:
+            return {
+                'category': 'linear',
+                'symbol': kwargs.get('symbol'),
+                'limit': 50
             }
         else:
             return {}
@@ -844,6 +858,34 @@ class UpbitManager(ExchangeManager):
         }
 
         query_string = unquote(urlencode(params, doseq=True)).encode("utf-8")
+        m = hashlib.sha512()
+        m.update(query_string)
+        query_hash = m.hexdigest()
+
+        payload = {
+            'access_key': upbit_access_key,
+            'nonce': str(uuid.uuid4()),
+            'query_hash': query_hash,
+            'query_hash_alg': 'SHA512',
+        }
+
+        jwt_token = jwt.encode(payload, upbit_secret_key)
+        authorization = 'Bearer {}'.format(jwt_token)
+        headers = {
+            'Authorization': authorization,
+        }
+
+        return await self.request('get', endpoint, headers, params)
+
+    async def get_order_history(self, uuids: list):
+        endpoint = self.config.order_history_url
+        
+        params = {
+            'uuids[]': uuids
+        }
+
+        query_string = unquote(urlencode(params, doseq=True)).encode("utf-8")
+        
         m = hashlib.sha512()
         m.update(query_string)
         query_hash = m.hexdigest()
@@ -1531,6 +1573,42 @@ class BybitManager(ExchangeManager):
             logger.error(traceback.format_exc())
             return None
 
+    async def get_funding_rate(self, symbol):
+        endpoint = self.config.funding_rate_url
+        params = self.config.get_params(endpoint, symbol=self.ticker_mapper(symbol))
+        headers = {"accept": "application/json"}
+
+        return await self.request('get', endpoint, headers, params)
+
+    async def get_order_history(self, symbol):
+        endpoint = self.config.order_history_url
+        params = self.config.get_params(endpoint, symbol=self.ticker_mapper(symbol))
+        
+        timestamp = str(int(time.time() * 1000))
+        recv_window = "5000"
+
+        param_str = '&'.join(f'{key}={value}' for key, value in params.items())
+        # Convert payload to JSON and create the pre-sign string
+        pre_sign = f"{timestamp}{bybit_access_key}{recv_window}{param_str}"
+
+        # Create the signature
+        signature = hmac.new(
+            bytes(bybit_secret_key, "utf-8"),
+            pre_sign.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        # Define headers
+        headers = {
+            "X-BAPI-API-KEY": bybit_access_key,
+            "X-BAPI-SIGN": signature,
+            "X-BAPI-TIMESTAMP": timestamp,
+            "X-BAPI-RECV-WINDOW": recv_window
+        }
+
+        return await self.request('get', endpoint, headers, params)
+
+    
 class BinanceManager(ExchangeManager):
     def __init__(self):
         super().__init__()
@@ -3213,6 +3291,9 @@ class TradingDataManager:
     async def set_leverage(self, symbol, leverage):
         return await self.ex.set_leverage('linear', symbol, leverage)
     
+    async def get_positions_by_ids(self):
+        pass
+
 class TradingBroker:
     def __init__(self, ex):
         self.ex_name = ex
@@ -3223,7 +3304,6 @@ class TradingBroker:
             res = await self.ex.post_order(PositionEntryIn)
             if res.get('retMsg') == 'OK':
                 return res.get('result').get('orderId')
-            logger.info(PositionEntryIn)
             raise ValueError(res)
         
         elif self.ex_name == 'binance':
