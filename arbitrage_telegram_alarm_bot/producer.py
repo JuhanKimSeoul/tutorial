@@ -82,7 +82,7 @@ def migrate_table():
             quoteVolume REAL NOT NULL,
             orderId TEXT NOT NULL,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            position TEXT NOT NULL,  -- 'long' or 'short'
+            position TEXT NOT NULL
         )
         """)
         
