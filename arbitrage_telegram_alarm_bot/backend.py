@@ -1,4 +1,6 @@
 from fastapi import FastAPI, Query, HTTPException
+from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 from pydantic import BaseModel
 from typing import List, Optional
@@ -33,6 +35,11 @@ def validate_datetime(dt_str: str):
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid datetime format: {dt_str}. Expected format: YYYY-MM-DD HH:MM")
 
+@app.get("/", response_class=HTMLResponse)
+def get_tradingview_html():
+    with open("tradingview.html", "r") as file:
+        return HTMLResponse(content=file.read(), status_code=200)
+
 @app.get("/orders", response_model=List[Order])
 def get_orders(
     exchange: Optional[str] = Query(None),
@@ -40,6 +47,11 @@ def get_orders(
     inq_st_dt: Optional[str] = Query(None),
     inq_close_dt: Optional[str] = Query(None)
 ):
+    logger.info(f"Querying Params\n"
+                f"exchange={exchange},\n"
+                f"ticker={ticker},\n"
+                f"inq_st_dt={inq_st_dt},\n"
+                f"inq_close_dt={inq_close_dt}")
     if inq_st_dt:
         validate_datetime(inq_st_dt)
     if inq_close_dt:

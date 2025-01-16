@@ -9,14 +9,18 @@
   <body>
     <div>
       <label for="exchange">Exchange:</label>
-      <input type="text" id="exchange" name="exchange" />
+      <select id="exchange" name="exchange" required>
+        <option value="">Select Exchange</option>
+        <option value="upbit">upbit</option>
+        <option value="bybit">bybit</option>
+      </select>
       <label for="ticker">Ticker:</label>
-      <input type="text" id="ticker" name="ticker" />
+      <input type="text" id="ticker" name="ticker" required />
       <label for="inq_st_dt">Start Date:</label>
       <input type="datetime-local" id="inq_st_dt" name="inq_st_dt" />
       <label for="inq_close_dt">End Date:</label>
       <input type="datetime-local" id="inq_close_dt" name="inq_close_dt" />
-      <button onclick="initializeChartWithInitialData()">Load Data</button>
+      <button onclick="submitForm()">Submit</button>
     </div>
   </body>
   <script>
@@ -33,7 +37,8 @@
 
     var candleSeries = chart.addCandlestickSeries();
 
-    const url = "https://api.upbit.com/v1/candles/minutes/5"; // 여기에 올바른 API 엔드포인트를 입력하세요
+    const upbit_url = "https://api.upbit.com/v1/candles/minutes/5"; // 여기에 올바른 API 엔드포인트를 입력하세요
+    const bybit_url = "https://api.bybit.com/v5/market/kline"; // 여기에 올바른 API 엔드포인트를 입력하세요
 
     var candles = [];
 
@@ -41,18 +46,33 @@
       return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
-    async function fetchCandles(market, count, to) {
-      const batchSize = 200;
+    async function fetchCandles(exchange, market, count, to) {
+      console.log("fetchCandles", exchange, market, count, to);
       let allData = [];
+      const url = exchange === "upbit" ? upbit_url : bybit_url;
+      const batchSize = exchange === "upbit" ? 200 : 1000;
 
       for (let i = 0; i < Math.ceil(count / batchSize); i++) {
         let ISOString = new Date(to).toISOString().split(".")[0];
-        const response = await fetch(
-          `${url}?market=${market}&count=${Math.min(
-            batchSize,
-            count - i * batchSize
-          )}&to=${ISOString}`
-        );
+        let response;
+        if (exchange === "upbit") {
+          response = await fetch(
+            `${url}?market=${"KRW-" + market}&count=${Math.min(
+              batchSize,
+              count - i * batchSize
+            )}&to=${ISOString}`
+          );
+        } else if (exchange === "bybit") {
+          response = await fetch(
+            `${url}?category=linear&symbol=${
+              market + "USDT"
+            }&interval=5&limit=${Math.min(
+              batchSize,
+              count - i * batchSize
+            )}&to=${ISOString}`
+          );
+        }
+
         const data = await response.json();
         allData = allData.concat(data);
         currentFrom = new Date(data[data.length - 1].candle_date_time_utc);
@@ -74,18 +94,20 @@
     }
 
     async function fetchInitialData() {
-      const market = "KRW-BTC";
+      const exchange = document.getElementById("exchange").value;
+      const market = document.getElementById("ticker").value;
       const count = 8640; // 5분봉 288개 (1일)
       const now = Date.now(); // 현재 시각 기준
-      const candles = await fetchCandles(market, count, now);
+      const candles = await fetchCandles(exchange, market, count, now);
       return candles.reverse();
     }
 
     async function fetchLatestCandle() {
-      const market = "KRW-BTC";
+      const exchange = document.getElementById("exchange").value;
+      const market = document.getElementById("ticker").value;
       const count = 1; // 가장 최근의 1개 봉만 가져옴
       const now = Date.now(); // 현재 시각 기준
-      const latestCandle = await fetchCandles(market, count, now);
+      const latestCandle = await fetchCandles(exchange, market, count, now);
       return latestCandle[0];
     }
 
@@ -156,7 +178,21 @@
       }, 1000); // 1초마다 업데이트
     }
 
-    // 차트 초기화 호출
-    initializeChartWithInitialData();
+    function submitForm() {
+      const exchange = document.getElementById("exchange").value;
+      const ticker = document.getElementById("ticker").value;
+
+      if (!exchange) {
+        alert("Exchange is required.");
+        return;
+      }
+
+      if (!ticker) {
+        alert("Ticker is required.");
+        return;
+      }
+
+      initializeChartWithInitialData();
+    }
   </script>
 </html>
