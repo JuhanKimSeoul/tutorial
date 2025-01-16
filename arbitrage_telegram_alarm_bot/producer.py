@@ -54,7 +54,7 @@ def create_table():
             quoteVolume REAL NOT NULL,
             orderId TEXT NOT NULL,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            position TEXT NOT NULL,  -- 'long' or 'short'
+            position TEXT NOT NULL
         )
         """)
         conn.commit()
@@ -118,7 +118,7 @@ def insert(**kwargs):
 
         # 데이터 삽입
         try:
-            cursor.execute("INSERT INTO 'order' (exchange, ticker, quoteVolume, orderId, timestamp, position) VALUES (?, ?, ?, ?, datetime('now', '+9 hours'), ?, ?, ?)", (exchange, ticker, quoteVolume, orderId, position))
+            cursor.execute("INSERT INTO 'order' (exchange, ticker, quoteVolume, orderId, timestamp, position) VALUES (?, ?, ?, ?, datetime('now', '+9 hours'), ?)", (exchange, ticker, quoteVolume, orderId, position))
         except sqlite3.IntegrityError as e:
             logger.info(f"Data insertion error: {e}")
         
@@ -135,14 +135,6 @@ def insert(**kwargs):
             conn.close()
 
 async def upbit_order_handler(data):
-    t = TradingDataManager(data.get('exchange'))
-
-    balance, minOrderQty, price = await asyncio.gather(
-        t.get_all_position_info(),
-        t.get_min_order_qty(data.get('ticker')),
-        t.get_single_ticker_price(data.get('ticker'))
-    )
-
     # 업비트는 선물이 없으므로, 양봉일 때에만 진입
     if data.get('candle_type') == '-':
         return
@@ -150,6 +142,14 @@ async def upbit_order_handler(data):
     # 10억 이하 거래량은 제외
     if data.get('quote_volume') < 1_000_000_000:
         return
+
+    t = TradingDataManager(data.get('exchange'))
+
+    balance, minOrderQty, price = await asyncio.gather(
+        t.get_all_position(),
+        t.get_min_order_qty(data.get('ticker')),
+        t.get_single_ticker_price(data.get('ticker'))
+    )
     
     bef_size = None
     bef_avg_price = None
@@ -238,7 +238,7 @@ async def bybit_order_handler(data):
             sl=sl
         )
 
-        logger.info(f"Order: {json.dumps(order.to_dict(), indent=4)}")
+        logger.debug(f"Order: {json.dumps(order.to_dict(), indent=4)}")
 
     return await TradingBroker('bybit').send_order(order)
 
@@ -281,15 +281,15 @@ def handle_message(message):
         try:
             loop = get_event_loop()
         
-            if data.get('exchange') not in ['bybit', 'upbit']:
+            if data.get('exchange') not in ['upbit']:
                 k = KimpManager()
                 return loop.run_until_complete(k.send_telegram(message['data']))
         
             loop.run_until_complete(handle_message_async(data1=data, data2=message['data']))
         except RuntimeError as e:   
-            logger.info(f"Runtime error: {e}")
+            logger.error(f"Runtime error: {e}")
         except Exception as e:
-            logger.info(f"Error: {e}")
+            logger.error(f"Error: {e}")
         
 def subscribe_to_redis():
     redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
