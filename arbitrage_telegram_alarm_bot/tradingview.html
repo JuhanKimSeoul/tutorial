@@ -6,7 +6,19 @@
     <title>TradingView Chart</title>
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
   </head>
-  <body></body>
+  <body>
+    <div>
+      <label for="exchange">Exchange:</label>
+      <input type="text" id="exchange" name="exchange" />
+      <label for="ticker">Ticker:</label>
+      <input type="text" id="ticker" name="ticker" />
+      <label for="inq_st_dt">Start Date:</label>
+      <input type="datetime-local" id="inq_st_dt" name="inq_st_dt" />
+      <label for="inq_close_dt">End Date:</label>
+      <input type="datetime-local" id="inq_close_dt" name="inq_close_dt" />
+      <button onclick="initializeChartWithInitialData()">Load Data</button>
+    </div>
+  </body>
   <script>
     var chart = LightweightCharts.createChart(document.body, {
       width: 600,
@@ -77,9 +89,55 @@
       return latestCandle[0];
     }
 
+    async function fetchOrders() {
+      const exchange = document.getElementById("exchange").value;
+      const ticker = document.getElementById("ticker").value;
+      const inq_st_dt = document
+        .getElementById("inq_st_dt")
+        .value.replace("T", " ");
+      const inq_close_dt = document
+        .getElementById("inq_close_dt")
+        .value.replace("T", " ");
+
+      // Validate datetime format
+      const datetimeRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
+      if (inq_st_dt && !datetimeRegex.test(inq_st_dt)) {
+        alert(
+          "Invalid start datetime format. Expected format: YYYY-MM-DD HH:MM"
+        );
+        return;
+      }
+      if (inq_close_dt && !datetimeRegex.test(inq_close_dt)) {
+        alert("Invalid end datetime format. Expected format: YYYY-MM-DD HH:MM");
+        return;
+      }
+
+      const params = new URLSearchParams({
+        exchange,
+        ticker,
+        inq_st_dt,
+        inq_close_dt,
+      });
+
+      const response = await fetch(
+        `http://3.36.76.27:8000/orders?${params.toString()}`
+      );
+      const orders = await response.json();
+      return orders.map((order) => ({
+        time: Math.floor(new Date(order.timestamp).getTime() / 1000),
+        position: order.position == "long" ? "belowBar" : "aboveBar",
+        color: order.position == "long" ? "green" : "red",
+        shape: order.position == "long" ? "arrowUp" : "arrowDown",
+      }));
+    }
+
     async function initializeChartWithInitialData() {
       candles = await fetchInitialData();
       candleSeries.setData(candles);
+
+      // Fetch and set markers
+      const markers = await fetchOrders();
+      candleSeries.setMarkers(markers);
 
       // 실시간 업데이트를 위한 setInterval 설정
       setInterval(async () => {
@@ -100,25 +158,5 @@
 
     // 차트 초기화 호출
     initializeChartWithInitialData();
-
-    // 4. 마커 추가 (특정 봉에 표시)
-    const markers = [
-      {
-        time: 1736640000, // 마커를 표시할 날짜
-        position: "aboveBar", // 'aboveBar' 또는 'belowBar'
-        color: "red",
-        shape: "arrowDown", // 'circle', 'square', 'arrowUp', 'arrowDown'
-        text: "Significant drop", // 마커 텍스트
-      },
-      {
-        time: 1736700000,
-        position: "belowBar",
-        color: "green",
-        shape: "arrowUp",
-        text: "Great rebound",
-      },
-    ];
-
-    candleSeries.setMarkers(markers);
   </script>
 </html>

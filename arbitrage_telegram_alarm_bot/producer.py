@@ -254,7 +254,7 @@ async def order_handler(data):
                ticker=data.get('ticker'), \
                quoteVolume=data.get('quote_volume'), \
                orderId=res, \
-               position='long' if data.get('candle_type') == '-' else 'short')
+               position='long' if data.get('exchange') in ['upbit'] else 'long' if data.get('candle_type') == '-' else 'short')
         return True
 
     return False
