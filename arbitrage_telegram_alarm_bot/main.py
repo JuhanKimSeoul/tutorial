@@ -119,7 +119,8 @@ class UpbitAPIConfig(ExchangeAPIConfig):
         elif url == self.kline_url:
             return {
                 'market': kwargs.get('symbol'),
-                'count': kwargs.get('limit', self.limit)
+                'count': kwargs.get('limit', self.limit),
+                'to': datetime.now().strftime('%Y-%m-%dT%H:%M:%S') if kwargs.get('to') is None else kwargs.get('to')
             }
         elif url == self.all_tickers_url:
             return {
@@ -553,9 +554,9 @@ class UpbitManager(ExchangeManager):
         res = await self.request('get', self.config.balance_url, headers)
         return float([ i.get('balance', 0) for i in res if i.get('currency') == symbol][0])
 
-    async def get_kline(self, symbol, interval, limit: int = 200):
+    async def get_kline(self, symbol, interval, limit: int = 200, to: str = None):
         endpoint = self.config.get_kline_endpoint(interval)
-        params = self.config.get_params(self.config.kline_url, symbol=self.ticker_mapper(symbol), limit=limit)
+        params = self.config.get_params(self.config.kline_url, symbol=self.ticker_mapper(symbol), limit=limit, to=to)
         headers = {"accept" : "application/json"}
 
         return await self.request('get', endpoint, headers, params)
@@ -3292,6 +3293,14 @@ class TradingDataManager:
     
     async def get_positions_by_ids(self):
         pass
+
+    async def get_ticker_kline(self, symbol, interval, to=None, limit=None):
+        if limit == None:
+            res = await self.ex.get_kline(symbol, interval, to=to)
+        else:
+            res = await self.ex.get_kline(symbol, interval, to=to, limit=limit)
+
+        return KlineOutMapper.from_exchange(res, self.ex_name)
 
 class TradingBroker:
     def __init__(self, ex):

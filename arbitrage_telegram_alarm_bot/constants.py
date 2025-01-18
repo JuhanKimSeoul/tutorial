@@ -1,6 +1,9 @@
 # constants.py
 from enum import Enum
 from dataclasses import dataclass, asdict
+import time
+from typing import Union
+from datetime import datetime
 
 interval_minutes = {
                     '1m' : 1,
@@ -226,9 +229,6 @@ class BithumbPositionEntryIn:
 
     def not_None_to_dict(self):
         return {k: v for k, v in asdict(self).items() if v is not None}
-    
-import time
-from typing import Union
 
 class PositionEntryMapper:
     # Mapping dictionaries
@@ -310,5 +310,50 @@ class PositionEntryMapper:
             return PositionEntryMapper.to_upbit(entry)
         elif exchange.lower() == 'bithumb':
             return PositionEntryMapper.to_bithumb(entry)
+        else:
+            raise ValueError(f"Unsupported exchange: {exchange}")
+        
+@dataclass
+class KlineOut:
+    timestamp: int
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    quote_volume: float = None
+
+    def to_dict(self):
+        return asdict(self)
+
+    def not_None_to_dict(self):
+        return {k: v for k, v in asdict(self).items() if v is not None}
+
+class KlineOutMapper:
+    @staticmethod
+    def from_bybit(data: dict) -> KlineOut:
+        """Convert Bybit Kline data to KlineOut"""
+        pass
+
+    @staticmethod
+    def from_upbit(data: dict) ->KlineOut:
+        """Convert Upbit Kline data to KlineOut"""
+        return [ KlineOut(
+            timestamp=int(datetime.strptime(item['candle_date_time_kst'], "%Y-%m-%dT%H:%M:%S").timestamp()),
+            open=float(item['opening_price']),
+            high=float(item['high_price']),
+            low=float(item['low_price']),
+            close=float(item['trade_price']),
+            volume=float(item['candle_acc_trade_volume']),
+            quote_volume=float(item['candle_acc_trade_price'])
+        ).not_None_to_dict() for item in data ]
+
+    @staticmethod
+    def from_exchange(data: dict, exchange: str) -> KlineOut:
+        """Convert exchange Kline data to KlineOut"""
+        if exchange.lower() == 'bybit':
+            return KlineOutMapper.from_bybit(data)
+        elif exchange.lower() == 'upbit':
+            return KlineOutMapper.from_upbit(data)
         else:
             raise ValueError(f"Unsupported exchange: {exchange}")
