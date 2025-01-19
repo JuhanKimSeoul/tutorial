@@ -210,10 +210,10 @@
       const interval = fixedInterval;
       const limit = 1;
       const params = new URLSearchParams({
-        exchange,
+        exchange: exchange,
         symbol: market,
-        interval,
-        limit,
+        interval: interval,
+        limit: limit,
       });
 
       let retries = 0;
