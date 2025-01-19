@@ -34,7 +34,7 @@
     </div>
   </body>
   <script>
-    const backendUrl = "http://127.0.0.1:8080";
+    const backendUrl = "http://3.36.76.27:8080";
     const maxRetries = 3; // Maximum number of retries
     const retryDelay = 1000; // Delay between retries in milliseconds
 
@@ -74,14 +74,30 @@
       return new Date(new Date().getTime() + timezoneOffset * 60 * 60 * 1000);
     }
 
-    async function fetchCandles(exchange, market, count, interval, to) {
+    function calculateCount(from, to, interval) {
+      const intervalInMinutes = {
+        "1m": 1,
+        "5m": 5,
+        "15m": 15,
+        "30m": 30,
+        "1h": 60,
+        "4h": 240,
+        "1d": 1440,
+      }[interval];
+
+      const diffInMinutes = (to - from) / (1000 * 60);
+      return Math.ceil(diffInMinutes / intervalInMinutes);
+    }
+
+    async function fetchCandles(exchange, market, interval, from, to) {
       console.log(`fetchCandles function input:
         - exchange: ${exchange}
         - market: ${market}
-        - count: ${count}
         - interval: ${interval}
+        - from: ${from}
         - to: ${to}`);
 
+      const count = calculateCount(from, to, interval);
       let allData = [];
       const batchSize = exchange === "upbit" ? 200 : 1000;
 
@@ -93,7 +109,6 @@
           interval: interval,
           to: ISOString,
         });
-        // console.log("params", params.toString());
 
         let retries = 0;
         let success = false;
@@ -130,7 +145,6 @@
         to =
           currentFrom.getTime() -
           interval.substring(0, interval.length - 1) * 60 * 1000; // 5분 봉이므로 5분을 빼줍니다.
-        // await sleep(100); // 요청 제한을 피하기 위해 100ms 대기
       }
 
       return allData.map((candle) => {
@@ -151,15 +165,9 @@
       const exchange = document.getElementById("exchange").value;
       const market = document.getElementById("ticker").value;
       const interval = document.getElementById("interval").value;
-      const count = 8640; // 5분봉 288개 (1일)
-      const now = getCurrentTime(); // 현재 시각 기준
-      const candles = await fetchCandles(
-        exchange,
-        market,
-        count,
-        interval,
-        now
-      );
+      const from = new Date(document.getElementById("inq_st_dt").value);
+      const to = new Date(document.getElementById("inq_close_dt").value);
+      const candles = await fetchCandles(exchange, market, interval, from, to);
       return candles.reverse();
     }
 
@@ -167,10 +175,12 @@
       const exchange = document.getElementById("exchange").value;
       const market = document.getElementById("ticker").value;
       const interval = document.getElementById("interval").value;
+      const limit = 1;
       const params = new URLSearchParams({
         exchange,
         symbol: market,
         interval,
+        limit,
       });
 
       let retries = 0;
@@ -180,7 +190,7 @@
       while (retries < maxRetries && !success) {
         try {
           let response = await fetch(
-            `${backendUrl}/kline_update?${params.toString()}`
+            `${backendUrl}/kline?${params.toString()}`
           );
 
           if (response.status === 429) {
@@ -189,6 +199,7 @@
             await sleep(retryDelay);
           } else {
             data = await response.json();
+            data = data[0];
             success = true;
           }
         } catch (error) {
@@ -202,8 +213,18 @@
         throw new Error("Failed to fetch data after multiple retries");
       }
 
+      const date = new Date(
+        (data.timestamp + getBrowserTimezoneOffset() * 60 * 60) * 1000
+      );
+      console.log(`latest candle date:
+                    -time : ${date.getTime() / 1000}
+                    -open : ${data.open}
+                    -high : ${data.high}
+                    -low : ${data.low}
+                    -close : ${data.close}`);
+
       return {
-        time: data.timestamp,
+        time: date.getTime() / 1000,
         open: data.open,
         high: data.high,
         low: data.low,
@@ -241,10 +262,9 @@
         inq_close_dt,
       });
 
-      const response = await fetch(
-        `http://3.36.76.27:8000/orders?${params.toString()}`
-      );
+      const response = await fetch(`${backendUrl}/orders?${params.toString()}`);
       const orders = await response.json();
+      console.log("orders: ", orders);
       return orders.map((order) => ({
         time: Math.floor(new Date(order.timestamp).getTime() / 1000),
         position: order.position == "long" ? "belowBar" : "aboveBar",
@@ -261,11 +281,10 @@
         (Date.now() - start_time) / 1000,
         "seconds"
       );
-      // console.log(candles);
       candleSeries.setData(candles);
 
       // Fetch and set markers
-      // const markers = await fetchOrders();
+      const markers = await fetchOrders();
       // candleSeries.setMarkers(markers);
 
       // 실시간 업데이트를 위한 setInterval 설정

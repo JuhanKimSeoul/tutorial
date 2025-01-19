@@ -130,25 +130,17 @@ def get_orders(
         ))
     return orders
 
-@app.get("/proxy")
-def proxy_request(url: str):
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/kline")
 @limiter.limit("10/second")
-async def get_kline(request: Request, exchange: str, symbol: str, interval: str, to: Optional[str] = None):
+async def get_kline(request: Request, exchange: str, symbol: str, interval: str, to: Optional[str] = None, limit: Optional[int] = None):
     logger.info(f"Querying Kline\n"
                 f"exchange={exchange},\n"
                 f"symbol={symbol},\n"
                 f"interval={interval},\n"
-                f"to={to}")
+                f"to={to},\n"
+                f"limit={limit}")
     
-    return await TradingDataManager(exchange).get_ticker_kline(symbol, interval, to)
+    return await TradingDataManager(exchange).get_ticker_kline(symbol, interval, to, limit)
 
 @app.get("/kline_update")
 def get_kline_update(exchange: str, symbol: str, interval: str):
@@ -167,9 +159,9 @@ def schedule_cache_kline():
     # logger.info(f"Cache updated: {data}")
 
 if __name__ == "__main__":
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(schedule_cache_kline, 'interval', seconds=1, max_instances=2)
-    scheduler.start()
+    # scheduler = BackgroundScheduler()
+    # scheduler.add_job(schedule_cache_kline, 'interval', seconds=1, max_instances=2)
+    # scheduler.start()
 
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8080)
+    uvicorn.run(app, host="0.0.0.0", port=8080)
