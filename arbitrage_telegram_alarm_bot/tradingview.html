@@ -50,7 +50,18 @@
     });
 
     var candleSeries = chart.addCandlestickSeries();
+    var volumeSeries = chart.addHistogramSeries({
+      priceFormat: {
+        type: "volume",
+      },
+      priceScaleId: "",
+      scaleMargins: {
+        top: 0.8,
+        bottom: 0,
+      },
+    });
     var candles = [];
+    var volumes = [];
     var updateInterval;
 
     // Variables to store fixed values
@@ -154,7 +165,7 @@
           interval.substring(0, interval.length - 1) * 60 * 1000; // 5분 봉이므로 5분을 빼줍니다.
       }
 
-      return allData.map((candle) => {
+      const candles = allData.map((candle) => {
         const date = new Date(
           (candle.timestamp + getBrowserTimezoneOffset() * 60 * 60) * 1000
         );
@@ -166,6 +177,22 @@
           close: candle.close,
         };
       });
+
+      const volumes = allData.map((candle) => {
+        const date = new Date(
+          (candle.timestamp + getBrowserTimezoneOffset() * 60 * 60) * 1000
+        );
+        return {
+          time: date.getTime() / 1000,
+          value: candle.volume,
+          color: candle.close < candle.open ? "red" : "#26a69a", // Red if bearish, green if bullish
+        };
+      });
+
+      return {
+        candles: candles.reverse(),
+        volumes: volumes.reverse(),
+      };
     }
 
     async function fetchInitialData() {
@@ -174,8 +201,7 @@
       const interval = fixedInterval;
       const from = fixedFrom;
       const to = fixedTo;
-      const candles = await fetchCandles(exchange, market, interval, from, to);
-      return candles.reverse();
+      return await fetchCandles(exchange, market, interval, from, to);
     }
 
     async function fetchLatestCandle() {
@@ -230,12 +256,22 @@
       //               -low : ${data.low}
       //               -close : ${data.close}`);
 
-      return {
+      const candle = {
         time: date.getTime() / 1000,
         open: data.open,
         high: data.high,
         low: data.low,
         close: data.close,
+      };
+
+      const volume = {
+        time: date.getTime() / 1000,
+        value: data.quote_volume,
+      };
+
+      return {
+        candle,
+        volume,
       };
     }
 
@@ -249,7 +285,8 @@
         .replace("T", " ");
 
       // Validate datetime format
-      const datetimeRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
+      const datetimeRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
       if (inq_st_dt && !datetimeRegex.test(inq_st_dt)) {
         alert(
           "Invalid start datetime format. Expected format: YYYY-MM-DD HH:MM"
@@ -296,7 +333,7 @@
         `${backendUrl}/position?${params.toString()}`
       );
       const position = await response.json();
-      console.log("position: ", position);
+      // console.log("position: ", position);
       return position;
     }
 
@@ -307,16 +344,32 @@
 
       // Clear existing data and lines
       chart.removeSeries(candleSeries);
+      chart.removeSeries(volumeSeries);
       candleSeries = chart.addCandlestickSeries();
+      volumeSeries = chart.addHistogramSeries({
+        color: "#26a69a",
+        priceFormat: {
+          type: "volume",
+        },
+        priceScaleId: "",
+        scaleMargins: {
+          top: 0.8,
+          bottom: 0,
+        },
+      });
 
       const start_time = Date.now();
-      candles = await fetchInitialData();
+      const { candles, volumes } = await fetchInitialData();
       console.log(
         "elapsed time: ",
         (Date.now() - start_time) / 1000,
         "seconds"
       );
+      // Set candle data
       candleSeries.setData(candles);
+
+      // Set volume data
+      volumeSeries.setData(volumes);
 
       // Fetch and set markers
       const markers = await fetchOrders();
@@ -338,27 +391,31 @@
 
       // 실시간 업데이트를 위한 setInterval 설정
       updateInterval = setInterval(async () => {
-        const latestCandle = await fetchLatestCandle();
+        const { latestCandle, latestVolume } = await fetchLatestCandle();
         const lastCandle = candles[candles.length - 1];
+        const lastVolume = volumes[volumes.length - 1];
 
         if (latestCandle.time > lastCandle.time) {
           // 새로운 봉이 생성된 경우
           candles.push(latestCandle);
+          volumes.push(latestVolume);
         } else {
           // 현재 봉이 업데이트된 경우
           candles[candles.length - 1] = latestCandle;
+          volumes[volumes.length - 1] = latestVolume;
         }
 
         candleSeries.setData(candles);
+        volumeSeries.setData(volumes);
       }, 1000); // 1초마다 업데이트
     }
 
     function submitForm() {
-      const fixedExchange = document.getElementById("exchange").value;
-      const fixedMarket = document.getElementById("ticker").value;
-      const fixedInterval = document.getElementById("interval").value;
-      const fixedFrom = new Date(document.getElementById("inq_st_dt").value);
-      const fixedTo = new Date(document.getElementById("inq_close_dt").value);
+      fixedExchange = document.getElementById("exchange").value;
+      fixedMarket = document.getElementById("ticker").value;
+      fixedInterval = document.getElementById("interval").value;
+      fixedFrom = new Date(document.getElementById("inq_st_dt").value);
+      fixedTo = new Date(document.getElementById("inq_close_dt").value);
 
       if (!exchange) {
         alert("Exchange is required.");

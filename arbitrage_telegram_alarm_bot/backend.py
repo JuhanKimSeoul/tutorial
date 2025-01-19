@@ -71,7 +71,7 @@ def connect_to_database(db_name="orders.db"):
 
 def validate_datetime(dt_str: str):
     try:
-        datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+        datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid datetime format: {dt_str}. Expected format: YYYY-MM-DD HH:MM")
 
