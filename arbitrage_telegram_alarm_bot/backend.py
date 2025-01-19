@@ -86,7 +86,7 @@ async def get_position(
     exchange: Optional[str] = Query(None),
     symbol: Optional[str] = Query(None),
 ):
-    res = TradingDataManager('upbit').get_all_position()
+    res = await TradingDataManager('upbit').get_all_position()
     return [ Position(item.get('id'), 
                     item.get('exchange'), 
                     item.get('symbol'), 
