@@ -83,14 +83,17 @@ async def get_tradingview_html():
 @app.get("/position", response_model=List[Position])
 async def get_position(
     exchange: Optional[str] = Query(None),
-    symbol: Optional[str] = Query(None),
+    ticker: Optional[str] = Query(None),
 ):
+    logger.info(f"Querying Params\n"
+                f"exchange={exchange}\n"
+                f"ticker={ticker}")
     res = await TradingDataManager(exchange).get_all_position()
     return [ Position(exchange=item.get('exchange'), 
                       ticker=item.get('ticker'), 
                       size=item.get('size'), 
                       avg_buy_price=item.get('avg_buy_price'), 
-                      position=item.get('position')) for item in res if item.get('exchange') == exchange and item.get('ticker') == symbol]
+                      position=item.get('position')) for item in res if item.get('exchange') == exchange and item.get('ticker') == ticker]
 
 @app.get("/orders", response_model=List[Order])
 async def get_orders(
