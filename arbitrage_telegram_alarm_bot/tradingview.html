@@ -295,6 +295,14 @@
     }
 
     async function initializeChartWithInitialData() {
+      // Clear existing data and lines
+      chart.removeSeries(candleSeries);
+      candleSeries = chart.addCandlestickSeries();
+
+      if (updateInterval) {
+        clearInterval(updateInterval);
+      }
+
       const start_time = Date.now();
       candles = await fetchInitialData();
       console.log(
@@ -323,7 +331,7 @@
       });
 
       // 실시간 업데이트를 위한 setInterval 설정
-      setInterval(async () => {
+      updateInterval = setInterval(async () => {
         const latestCandle = await fetchLatestCandle();
         const lastCandle = candles[candles.length - 1];
 
