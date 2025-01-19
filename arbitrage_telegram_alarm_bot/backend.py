@@ -44,7 +44,6 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
         content={"detail": "Rate limit exceeded"}
     )
 class Position(BaseModel):
-    id: int
     exchange: str
     ticker: str
     size: float
@@ -86,13 +85,12 @@ async def get_position(
     exchange: Optional[str] = Query(None),
     symbol: Optional[str] = Query(None),
 ):
-    res = await TradingDataManager('upbit').get_all_position()
-    return [ Position(item.get('id'), 
-                    item.get('exchange'), 
-                    item.get('symbol'), 
+    res = await TradingDataManager(exchange).get_all_position()
+    return [ Position(item.get('exchange'), 
+                    item.get('ticker'), 
                     item.get('size'), 
                     item.get('avg_buy_price'), 
-                    item.get('position')) for item in res if (item.get('exchange') == exchange) and (item.get('symbol') == symbol)]
+                    item.get('position')) for item in res if item.get('exchange') == exchange and item.get('ticker') == symbol]
 
 @app.get("/orders", response_model=List[Order])
 async def get_orders(

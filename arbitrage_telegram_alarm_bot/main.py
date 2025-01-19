@@ -845,11 +845,11 @@ class UpbitManager(ExchangeManager):
 
         res = await self.request('get', self.config.balance_url, headers)
 
-        return [{'symbol': item['currency'], \
-                 'side': 'bid', \
+        return [{'exchange': self.config.name, \
+                 'ticker': item['currency'], \
+                 'position': 'long', \
                  'size': item['balance'], \
-                 'avg_buy_price': item['avg_buy_price'], \
-                 'position' : 'long' } \
+                 'avg_buy_price': item['avg_buy_price']} \
                  for item in res]
     
     async def get_closed_orders(self, symbol):
