@@ -216,12 +216,12 @@
       const date = new Date(
         (data.timestamp + getBrowserTimezoneOffset() * 60 * 60) * 1000
       );
-      console.log(`latest candle date:
-                    -time : ${date.getTime() / 1000}
-                    -open : ${data.open}
-                    -high : ${data.high}
-                    -low : ${data.low}
-                    -close : ${data.close}`);
+      // console.log(`latest candle date:
+      //               -time : ${date.getTime() / 1000}
+      //               -open : ${data.open}
+      //               -high : ${data.high}
+      //               -low : ${data.low}
+      //               -close : ${data.close}`);
 
       return {
         time: date.getTime() / 1000,
@@ -264,13 +264,34 @@
 
       const response = await fetch(`${backendUrl}/orders?${params.toString()}`);
       const orders = await response.json();
-      console.log("orders: ", orders);
+      // console.log("orders: ", orders);
       return orders.map((order) => ({
-        time: Math.floor(new Date(order.timestamp).getTime() / 1000),
+        time: Math.floor(
+          (new Date(order.timestamp).getTime() +
+            getBrowserTimezoneOffset() * 60 * 60 * 1000) /
+            1000
+        ),
         position: order.position == "long" ? "belowBar" : "aboveBar",
         color: order.position == "long" ? "green" : "red",
         shape: order.position == "long" ? "arrowUp" : "arrowDown",
       }));
+    }
+
+    async function fetchPosition() {
+      const exchange = document.getElementById("exchange").value;
+      const ticker = document.getElementById("ticker").value;
+
+      const params = new URLSearchParams({
+        exchange,
+        ticker,
+      });
+
+      const response = await fetch(
+        `${backendUrl}/position?${params.toString()}`
+      );
+      const position = await response.json();
+      console.log("position: ", position);
+      return position;
     }
 
     async function initializeChartWithInitialData() {
@@ -285,7 +306,21 @@
 
       // Fetch and set markers
       const markers = await fetchOrders();
-      // candleSeries.setMarkers(markers);
+      // console.log("markers :", markers);
+      candleSeries.setMarkers(markers);
+
+      // Fetch and set position lines
+      const positions = await fetchPosition();
+      positions.forEach((pos) => {
+        candleSeries.createPriceLine({
+          price: pos.avg_buy_price,
+          color: "blue",
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: `Avg Buy Price: ${pos.avg_buy_price}, Size: ${pos.size}`,
+        });
+      });
 
       // 실시간 업데이트를 위한 setInterval 설정
       setInterval(async () => {

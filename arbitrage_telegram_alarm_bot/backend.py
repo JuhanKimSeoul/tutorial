@@ -43,6 +43,13 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
         status_code=429,
         content={"detail": "Rate limit exceeded"}
     )
+class Position(BaseModel):
+    id: int
+    exchange: str
+    ticker: str
+    size: float
+    avg_buy_price: float
+    position: str
 
 class Order(BaseModel):
     id: int
@@ -74,8 +81,21 @@ async def get_tradingview_html():
     with open("tradingview.html", "r") as file:
         return HTMLResponse(content=file.read(), status_code=200)
 
+@app.get("/position", response_class=List[Position])
+async def get_position(
+    exchange: Optional[str] = Query(None),
+    symbol: Optional[str] = Query(None),
+):
+    res = TradingDataManager('upbit').get_all_position()
+    return [ Position(item.get('id'), 
+                    item.get('exchange'), 
+                    item.get('symbol'), 
+                    item.get('size'), 
+                    item.get('avg_buy_price'), 
+                    item.get('position')) for item in res if (item.get('exchange') == exchange) and (item.get('symbol') == symbol)]
+
 @app.get("/orders", response_model=List[Order])
-def get_orders(
+async def get_orders(
     exchange: Optional[str] = Query(None),
     ticker: Optional[str] = Query(None),
     inq_st_dt: Optional[str] = Query(None),
@@ -164,4 +184,4 @@ if __name__ == "__main__":
     # scheduler.start()
 
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

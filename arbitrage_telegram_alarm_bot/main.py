@@ -847,8 +847,9 @@ class UpbitManager(ExchangeManager):
 
         return [{'symbol': item['currency'], \
                  'side': 'bid', \
-                 'size': item['balance'], 
-                 'avg_buy_price': item['avg_buy_price']} \
+                 'size': item['balance'], \
+                 'avg_buy_price': item['avg_buy_price'], \
+                 'position' : 'long' } \
                  for item in res]
     
     async def get_closed_orders(self, symbol):
