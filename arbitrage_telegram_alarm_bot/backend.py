@@ -81,7 +81,7 @@ async def get_tradingview_html():
     with open("tradingview.html", "r") as file:
         return HTMLResponse(content=file.read(), status_code=200)
 
-@app.get("/position", response_class=List[Position])
+@app.get("/position", response_model=List[Position])
 async def get_position(
     exchange: Optional[str] = Query(None),
     symbol: Optional[str] = Query(None),
