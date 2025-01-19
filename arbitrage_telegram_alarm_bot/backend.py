@@ -86,11 +86,11 @@ async def get_position(
     symbol: Optional[str] = Query(None),
 ):
     res = await TradingDataManager(exchange).get_all_position()
-    return [ Position(item.get('exchange'), 
-                    item.get('ticker'), 
-                    item.get('size'), 
-                    item.get('avg_buy_price'), 
-                    item.get('position')) for item in res if item.get('exchange') == exchange and item.get('ticker') == symbol]
+    return [ Position(exchange=item.get('exchange'), 
+                      ticker=item.get('ticker'), 
+                      size=item.get('size'), 
+                      avg_buy_price=item.get('avg_buy_price'), 
+                      position=item.get('position')) for item in res if item.get('exchange') == exchange and item.get('ticker') == symbol]
 
 @app.get("/orders", response_model=List[Order])
 async def get_orders(
