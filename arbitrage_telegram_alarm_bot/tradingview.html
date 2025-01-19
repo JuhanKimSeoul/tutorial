@@ -50,8 +50,15 @@
     });
 
     var candleSeries = chart.addCandlestickSeries();
-
     var candles = [];
+    var updateInterval;
+
+    // Variables to store fixed values
+    var fixedExchange;
+    var fixedMarket;
+    var fixedInterval;
+    var fixedFrom;
+    var fixedTo;
 
     function sleep(ms) {
       return new Promise((resolve) => setTimeout(resolve, ms));
@@ -162,19 +169,19 @@
     }
 
     async function fetchInitialData() {
-      const exchange = document.getElementById("exchange").value;
-      const market = document.getElementById("ticker").value;
-      const interval = document.getElementById("interval").value;
-      const from = new Date(document.getElementById("inq_st_dt").value);
-      const to = new Date(document.getElementById("inq_close_dt").value);
+      const exchange = fixedExchange;
+      const market = fixedMarket;
+      const interval = fixedInterval;
+      const from = fixedFrom;
+      const to = fixedTo;
       const candles = await fetchCandles(exchange, market, interval, from, to);
       return candles.reverse();
     }
 
     async function fetchLatestCandle() {
-      const exchange = document.getElementById("exchange").value;
-      const market = document.getElementById("ticker").value;
-      const interval = document.getElementById("interval").value;
+      const exchange = fixedExchange;
+      const market = fixedMarket;
+      const interval = fixedInterval;
       const limit = 1;
       const params = new URLSearchParams({
         exchange,
@@ -233,14 +240,13 @@
     }
 
     async function fetchOrders() {
-      const exchange = document.getElementById("exchange").value;
-      const ticker = document.getElementById("ticker").value;
-      const inq_st_dt = document
-        .getElementById("inq_st_dt")
-        .value.replace("T", " ");
-      const inq_close_dt = document
-        .getElementById("inq_close_dt")
-        .value.replace("T", " ");
+      const exchange = fixedExchange;
+      const ticker = fixedMarket;
+      const inq_st_dt = fixedFrom.toISOString().split(".")[0].replace("T", " ");
+      const inq_close_dt = fixedTo
+        .toISOString()
+        .split(".")[0]
+        .replace("T", " ");
 
       // Validate datetime format
       const datetimeRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
@@ -278,8 +284,8 @@
     }
 
     async function fetchPosition() {
-      const exchange = document.getElementById("exchange").value;
-      const ticker = document.getElementById("ticker").value;
+      const exchange = fixedExchange;
+      const ticker = fixedMarket;
 
       const params = new URLSearchParams({
         exchange,
@@ -295,13 +301,13 @@
     }
 
     async function initializeChartWithInitialData() {
-      // Clear existing data and lines
-      chart.removeSeries(candleSeries);
-      candleSeries = chart.addCandlestickSeries();
-
       if (updateInterval) {
         clearInterval(updateInterval);
       }
+
+      // Clear existing data and lines
+      chart.removeSeries(candleSeries);
+      candleSeries = chart.addCandlestickSeries();
 
       const start_time = Date.now();
       candles = await fetchInitialData();
@@ -348,8 +354,11 @@
     }
 
     function submitForm() {
-      const exchange = document.getElementById("exchange").value;
-      const ticker = document.getElementById("ticker").value;
+      const fixedExchange = document.getElementById("exchange").value;
+      const fixedMarket = document.getElementById("ticker").value;
+      const fixedInterval = document.getElementById("interval").value;
+      const fixedFrom = new Date(document.getElementById("inq_st_dt").value);
+      const fixedTo = new Date(document.getElementById("inq_close_dt").value);
 
       if (!exchange) {
         alert("Exchange is required.");
