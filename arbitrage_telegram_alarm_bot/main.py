@@ -151,19 +151,20 @@ class UpbitAPIConfig(ExchangeAPIConfig):
             return {}
     
     def get_kline_endpoint(self, interval):
-        if int(interval[:-1]) not in self.interval_enum:
-            raise ValueError
-
         endpoint = '/v1/candles/'
 
         if interval[-1] == 'h':
             endpoint += 'minutes/'
             interval = int(interval[:-1]) * 60
+            if interval not in self.interval_enum:
+                raise ValueError
             endpoint += str(interval)
 
         elif interval[-1] == 'm':
             endpoint += 'minutes/'
             interval = int(interval[:-1])
+            if interval not in self.interval_enum:
+                raise ValueError
             endpoint += str(interval)
 
         elif interval[-1] == 'd':
@@ -223,19 +224,20 @@ class BithumbAPIConfig(ExchangeAPIConfig):
             return {}
 
     def get_kline_endpoint(self, interval):
-        if int(interval[:-1]) not in self.interval_enum:
-            raise ValueError
-
         endpoint = '/v1/candles/'
 
         if interval[-1] == 'h':
             endpoint += 'minutes/'
             interval = int(interval[:-1]) * 60
+            if int(interval[:-1]) not in self.interval_enum:
+                raise ValueError
             endpoint += str(interval)
 
         elif interval[-1] == 'm':
             endpoint += 'minutes/'
             interval = int(interval[:-1])
+            if int(interval[:-1]) not in self.interval_enum:
+                raise ValueError
             endpoint += str(interval)
 
         elif interval[-1] == 'd':

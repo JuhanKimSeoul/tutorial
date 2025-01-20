@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TradingView Chart</title>
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+      #chart-container {
+        width: 100%;
+        height: 500px;
+        padding: 0;
+        margin: 0;
+        box-sizing: border-box;
+      }
+    </style>
   </head>
   <body>
     <div>
@@ -32,34 +41,31 @@
       <input type="datetime-local" id="inq_close_dt" name="inq_close_dt" />
       <button onclick="submitForm()">Submit</button>
     </div>
+    <div id="chart-container"></div>
   </body>
   <script>
     const backendUrl = "http://3.36.76.27:8000";
     const maxRetries = 3; // Maximum number of retries
     const retryDelay = 1000; // Delay between retries in milliseconds
 
-    var chart = LightweightCharts.createChart(document.body, {
-      width: 600,
-      height: 300,
-    });
-    chart.applyOptions({
+    const chartContainer = document.getElementById("chart-container");
+    var chart = LightweightCharts.createChart(chartContainer, {
+      width: chartContainer.clientWidth,
+      height: chartContainer.clientHeight,
       timeScale: {
         timeVisible: true, // 시간을 표시
+        borderVisible: true,
         secondsVisible: false, // 초는 제외
       },
-    });
-
-    var candleSeries = chart.addCandlestickSeries();
-    var volumeSeries = chart.addHistogramSeries({
-      priceFormat: {
-        type: "volume",
+      rightPriceScale: {
+        visible: true,
       },
-      priceScaleId: "",
-      scaleMargins: {
-        top: 0.8,
-        bottom: 0,
+      leftPriceScale: {
+        visible: false,
       },
     });
+    var candleSeries;
+    var volumeSeries;
     var candles = [];
     var volumes = [];
     var updateInterval;
@@ -184,7 +190,7 @@
         );
         return {
           time: date.getTime() / 1000,
-          value: candle.volume,
+          value: candle.quote_volume,
           color: candle.close < candle.open ? "red" : "#26a69a", // Red if bearish, green if bullish
         };
       });
@@ -267,19 +273,27 @@
       const volume = {
         time: date.getTime() / 1000,
         value: data.quote_volume,
+        color: candle.close < candle.open ? "red" : "#26a69a", // Red if bearish, green if bullish
       };
 
       return {
-        candle,
-        volume,
+        latestCandle: candle,
+        latestVolume: volume,
       };
     }
 
     async function fetchOrders() {
       const exchange = fixedExchange;
       const ticker = fixedMarket;
-      const inq_st_dt = fixedFrom.toISOString().split(".")[0].replace("T", " ");
-      const inq_close_dt = fixedTo
+      const inq_st_dt = new Date(
+        fixedFrom.getTime() + timezoneOffset * 60 * 60 * 1000
+      )
+        .toISOString()
+        .split(".")[0]
+        .replace("T", " ");
+      const inq_close_dt = new Date(
+        fixedTo.getTime() + timezoneOffset * 60 * 60 * 1000
+      )
         .toISOString()
         .split(".")[0]
         .replace("T", " ");
@@ -343,20 +357,8 @@
       }
 
       // Clear existing data and lines
-      chart.removeSeries(candleSeries);
-      chart.removeSeries(volumeSeries);
-      candleSeries = chart.addCandlestickSeries();
-      volumeSeries = chart.addHistogramSeries({
-        color: "#26a69a",
-        priceFormat: {
-          type: "volume",
-        },
-        priceScaleId: "",
-        scaleMargins: {
-          top: 0.8,
-          bottom: 0,
-        },
-      });
+      if (candleSeries != undefined) chart.removeSeries(candleSeries);
+      if (volumeSeries != undefined) chart.removeSeries(volumeSeries);
 
       const start_time = Date.now();
       const { candles, volumes } = await fetchInitialData();
@@ -365,15 +367,36 @@
         (Date.now() - start_time) / 1000,
         "seconds"
       );
+
+      candleSeries = chart.addCandlestickSeries();
       // Set candle data
       candleSeries.setData(candles);
+
+      volumeSeries = chart.addHistogramSeries(
+        {
+          color: "#26a69a",
+          priceFormat: {
+            type: "volume",
+          },
+          priceScaleId: "",
+        },
+        1
+      );
+
+      volumeSeries.priceScale().applyOptions({
+        autoScale: false, // disables auto scaling based on visible content
+        scaleMargins: {
+          top: 0.7,
+          bottom: 0,
+        },
+      });
 
       // Set volume data
       volumeSeries.setData(volumes);
 
       // Fetch and set markers
       const markers = await fetchOrders();
-      // console.log("markers :", markers);
+      console.log("markers :", markers);
       candleSeries.setMarkers(markers);
 
       // Fetch and set position lines
@@ -385,7 +408,7 @@
           lineWidth: 2,
           lineStyle: LightweightCharts.LineStyle.Solid,
           axisLabelVisible: true,
-          title: `Avg Buy Price: ${pos.avg_buy_price}, Size: ${pos.size}`,
+          title: `Size: ${pos.size}`,
         });
       });
 
@@ -429,5 +452,10 @@
 
       initializeChartWithInitialData();
     }
+
+    // 반응형 처리
+    window.addEventListener("resize", () => {
+      chart.resize(chartContainer.clientWidth, chartContainer.clientHeight);
+    });
   </script>
 </html>
