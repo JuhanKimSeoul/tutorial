@@ -3326,7 +3326,11 @@ class TradingBroker:
         elif self.ex_name == 'upbit':
             res = await self.ex.post_order(PositionEntryIn)
             if res.get('uuid'):
-                return res.get('uuid')
+                return PositionEntryOut(order_id=res.get('uuid'), 
+                                        side=PositionEntryIn.side, 
+                                        symbol=PositionEntryIn.symbol, 
+                                        order_type=PositionEntryIn.order_type, 
+                                        qty=PositionEntryIn.qty)
             raise ValueError(res)
         
         elif self.ex_name == 'bithumb':

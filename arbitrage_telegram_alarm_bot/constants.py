@@ -314,6 +314,23 @@ class PositionEntryMapper:
             raise ValueError(f"Unsupported exchange: {exchange}")
         
 @dataclass
+class PositionEntryOut:
+    symbol: str
+    order_id: str
+    side: str
+    order_type: str
+    qty: float
+    tp: float = None
+    sl: float = None
+
+    def to_dict(self):
+        return asdict(self)
+
+    def not_None_to_dict(self):
+        return {k: v for k, v in asdict(self).items() if v is not None}
+
+
+@dataclass
 class KlineOut:
     timestamp: int
     open: float

@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TradingView Chart</title>
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css"
+      rel="stylesheet"
+    />
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
     <style>
       #chart-container {
@@ -13,125 +17,260 @@
         margin: 0;
         box-sizing: border-box;
       }
+      #orders-container {
+        margin-top: 20px;
+      }
     </style>
   </head>
   <body>
-    <div>
-      <label for="exchange">Exchange:</label>
-      <select id="exchange" name="exchange" required>
-        <option value="">Select Exchange</option>
-        <option value="upbit">upbit</option>
-        <option value="bybit">bybit</option>
-      </select>
-      <label for="ticker">Ticker:</label>
-      <input type="text" id="ticker" name="ticker" required />
-      <label for="interval">Interval:</label>
-      <select id="interval" id="interval" , name="interval" required>
-        <option value="1m">1m</option>
-        <option value="5m">5m</option>
-        <option value="15m">15m</option>
-        <option value="30m">30m</option>
-        <option value="1h">1h</option>
-        <option value="4h">4h</option>
-        <option value="1d">1d</option>
-      </select>
-      <label for="inq_st_dt">Start Date:</label>
-      <input type="datetime-local" id="inq_st_dt" name="inq_st_dt" />
-      <label for="inq_close_dt">End Date:</label>
-      <input type="datetime-local" id="inq_close_dt" name="inq_close_dt" />
-      <button onclick="submitForm()">Submit</button>
+    <div class="container">
+      <div class="row">
+        <div class="input-field col s12 m6">
+          <select id="exchange" name="exchange" required>
+            <option value="" disabled selected>Select Exchange</option>
+            <option value="upbit">upbit</option>
+            <option value="bybit">bybit</option>
+          </select>
+          <label for="exchange">Exchange</label>
+        </div>
+        <div class="input-field col s12 m6">
+          <input type="text" id="ticker" name="ticker" required />
+          <label for="ticker">Ticker</label>
+        </div>
+        <div class="input-field col s12 m6">
+          <select id="interval" name="interval" required>
+            <option value="1m">1m</option>
+            <option value="5m">5m</option>
+            <option value="15m">15m</option>
+            <option value="30m">30m</option>
+            <option value="1h">1h</option>
+            <option value="4h">4h</option>
+            <option value="1d">1d</option>
+          </select>
+          <label for="interval">Interval</label>
+        </div>
+        <div class="col s12 m6">
+          <input
+            type="datetime-local"
+            id="inq_st_dt"
+            name="inq_st_dt"
+            placeholder=""
+          />
+          <label for="inq_st_dt">Start Date</label>
+        </div>
+        <div class="col s12 m6">
+          <input
+            type="datetime-local"
+            id="inq_close_dt"
+            name="inq_close_dt"
+            placeholder=""
+          />
+          <label for="inq_close_dt">End Date</label>
+        </div>
+        <div class="col s12">
+          <button class="btn waves-effect waves-light" onclick="submitForm()">
+            Submit
+          </button>
+        </div>
+      </div>
+      <div id="chart-container"></div>
+      <div id="orders-container">
+        <table id="orders-table" class="highlight">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Quote Volume</th>
+              <th>Position</th>
+              <th>Order ID</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
-    <div id="chart-container"></div>
-  </body>
-  <script>
-    const backendUrl = "http://3.36.76.27:8000";
-    const maxRetries = 3; // Maximum number of retries
-    const retryDelay = 1000; // Delay between retries in milliseconds
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        var elems = document.querySelectorAll("select");
+        M.FormSelect.init(elems);
+      });
 
-    const chartContainer = document.getElementById("chart-container");
-    var chart = LightweightCharts.createChart(chartContainer, {
-      width: chartContainer.clientWidth,
-      height: chartContainer.clientHeight,
-      timeScale: {
-        timeVisible: true, // 시간을 표시
-        borderVisible: true,
-        secondsVisible: false, // 초는 제외
-      },
-      rightPriceScale: {
-        visible: true,
-      },
-      leftPriceScale: {
-        visible: false,
-      },
-    });
-    var candleSeries;
-    var volumeSeries;
-    var candles = [];
-    var volumes = [];
-    var updateInterval;
+      const backendUrl = "http://3.36.76.27:8000";
+      const maxRetries = 3; // Maximum number of retries
+      const retryDelay = 1000; // Delay between retries in milliseconds
 
-    // Variables to store fixed values
-    var fixedExchange;
-    var fixedMarket;
-    var fixedInterval;
-    var fixedFrom;
-    var fixedTo;
+      const chartContainer = document.getElementById("chart-container");
+      var chart = LightweightCharts.createChart(chartContainer, {
+        width: chartContainer.clientWidth,
+        height: chartContainer.clientHeight,
+        timeScale: {
+          timeVisible: true, // 시간을 표시
+          borderVisible: true,
+          secondsVisible: false, // 초는 제외
+        },
+        rightPriceScale: {
+          visible: true,
+        },
+        leftPriceScale: {
+          visible: false,
+        },
+      });
+      var candleSeries;
+      var volumeSeries;
+      var candles = [];
+      var volumes = [];
+      var updateInterval;
 
-    function sleep(ms) {
-      return new Promise((resolve) => setTimeout(resolve, ms));
-    }
+      // Variables to store fixed values
+      var fixedExchange;
+      var fixedMarket;
+      var fixedInterval;
+      var fixedFrom;
+      var fixedTo;
 
-    function getBrowserTimezoneOffset() {
-      const offsetInMinutes = new Date().getTimezoneOffset();
-      const offsetInHours = -offsetInMinutes / 60;
-      return offsetInHours;
-    }
+      function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
 
-    const timezoneOffset = getBrowserTimezoneOffset();
-    console.log(
-      `The browser's time zone offset is UTC${
-        timezoneOffset >= 0 ? "+" : ""
-      }${timezoneOffset}`
-    );
+      function getBrowserTimezoneOffset() {
+        const offsetInMinutes = new Date().getTimezoneOffset();
+        const offsetInHours = -offsetInMinutes / 60;
+        return offsetInHours;
+      }
 
-    function getCurrentTime() {
-      return new Date(new Date().getTime() + timezoneOffset * 60 * 60 * 1000);
-    }
+      const timezoneOffset = getBrowserTimezoneOffset();
+      console.log(
+        `The browser's time zone offset is UTC${
+          timezoneOffset >= 0 ? "+" : ""
+        }${timezoneOffset}`
+      );
 
-    function calculateCount(from, to, interval) {
-      const intervalInMinutes = {
-        "1m": 1,
-        "5m": 5,
-        "15m": 15,
-        "30m": 30,
-        "1h": 60,
-        "4h": 240,
-        "1d": 1440,
-      }[interval];
+      function getCurrentTime() {
+        return new Date(new Date().getTime() + timezoneOffset * 60 * 60 * 1000);
+      }
 
-      const diffInMinutes = (to - from) / (1000 * 60);
-      return Math.ceil(diffInMinutes / intervalInMinutes);
-    }
+      function calculateCount(from, to, interval) {
+        const intervalInMinutes = {
+          "1m": 1,
+          "5m": 5,
+          "15m": 15,
+          "30m": 30,
+          "1h": 60,
+          "4h": 240,
+          "1d": 1440,
+        }[interval];
 
-    async function fetchCandles(exchange, market, interval, from, to) {
-      console.log(`fetchCandles function input:
-        - exchange: ${exchange}
-        - market: ${market}
-        - interval: ${interval}
-        - from: ${from}
-        - to: ${to}`);
+        const diffInMinutes = (to - from) / (1000 * 60);
+        return Math.ceil(diffInMinutes / intervalInMinutes);
+      }
 
-      const count = calculateCount(from, to, interval);
-      let allData = [];
-      const batchSize = exchange === "upbit" ? 200 : 1000;
+      async function fetchCandles(exchange, market, interval, from, to) {
+        console.log(`fetchCandles function input:
+          - exchange: ${exchange}
+          - market: ${market}
+          - interval: ${interval}
+          - from: ${from}
+          - to: ${to}`);
 
-      for (let i = 0; i < Math.ceil(count / batchSize); i++) {
-        let ISOString = new Date(to).toISOString().split(".")[0];
-        let params = new URLSearchParams({
+        const count = calculateCount(from, to, interval);
+        let allData = [];
+        const batchSize = exchange === "upbit" ? 200 : 1000;
+
+        for (let i = 0; i < Math.ceil(count / batchSize); i++) {
+          let ISOString = new Date(to).toISOString().split(".")[0];
+          let params = new URLSearchParams({
+            exchange: exchange,
+            symbol: market,
+            interval: interval,
+            to: ISOString,
+          });
+
+          let retries = 0;
+          let success = false;
+          let data;
+
+          while (retries < maxRetries && !success) {
+            try {
+              let response = await fetch(
+                `${backendUrl}/kline?${params.toString()}`
+              );
+
+              if (response.status === 429) {
+                console.warn("429 Too Many Requests, retrying...");
+                retries++;
+                await sleep(retryDelay);
+              } else {
+                data = await response.json();
+                success = true;
+              }
+            } catch (error) {
+              console.error("Error fetching data:", error);
+              retries++;
+              await sleep(retryDelay);
+            }
+          }
+
+          if (!success) {
+            throw new Error("Failed to fetch data after multiple retries");
+          }
+
+          allData = allData.concat(data);
+          currentFrom = new Date(data[data.length - 1].timestamp * 1000);
+          currentTo = new Date(data[0].timestamp * 1000);
+          to =
+            currentFrom.getTime() -
+            interval.substring(0, interval.length - 1) * 60 * 1000; // 5분 봉이므로 5분을 빼줍니다.
+        }
+
+        const candles = allData.map((candle) => {
+          const date = new Date(
+            (candle.timestamp + getBrowserTimezoneOffset() * 60 * 60) * 1000
+          );
+          return {
+            time: date.getTime() / 1000,
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+          };
+        });
+
+        const volumes = allData.map((candle) => {
+          const date = new Date(
+            (candle.timestamp + getBrowserTimezoneOffset() * 60 * 60) * 1000
+          );
+          return {
+            time: date.getTime() / 1000,
+            value: candle.quote_volume,
+            color: candle.close < candle.open ? "red" : "#26a69a", // Red if bearish, green if bullish
+          };
+        });
+
+        return {
+          candles: candles.reverse(),
+          volumes: volumes.reverse(),
+        };
+      }
+
+      async function fetchInitialData() {
+        const exchange = fixedExchange;
+        const market = fixedMarket;
+        const interval = fixedInterval;
+        const from = fixedFrom;
+        const to = fixedTo;
+        return await fetchCandles(exchange, market, interval, from, to);
+      }
+
+      async function fetchLatestCandle() {
+        const exchange = fixedExchange;
+        const market = fixedMarket;
+        const interval = fixedInterval;
+        const limit = 1;
+        const params = new URLSearchParams({
           exchange: exchange,
           symbol: market,
           interval: interval,
-          to: ISOString,
+          limit: limit,
         });
 
         let retries = 0;
@@ -150,6 +289,7 @@
               await sleep(retryDelay);
             } else {
               data = await response.json();
+              data = data[0];
               success = true;
             }
           } catch (error) {
@@ -163,299 +303,232 @@
           throw new Error("Failed to fetch data after multiple retries");
         }
 
-        allData = allData.concat(data);
-        currentFrom = new Date(data[data.length - 1].timestamp * 1000);
-        currentTo = new Date(data[0].timestamp * 1000);
-        to =
-          currentFrom.getTime() -
-          interval.substring(0, interval.length - 1) * 60 * 1000; // 5분 봉이므로 5분을 빼줍니다.
-      }
-
-      const candles = allData.map((candle) => {
         const date = new Date(
-          (candle.timestamp + getBrowserTimezoneOffset() * 60 * 60) * 1000
+          (data.timestamp + getBrowserTimezoneOffset() * 60 * 60) * 1000
         );
-        return {
+        // console.log(`latest candle date:
+        //               -time : ${date.getTime() / 1000}
+        //               -open : ${data.open}
+        //               -high : ${data.high}
+        //               -low : ${data.low}
+        //               -close : ${data.close}`);
+
+        const candle = {
           time: date.getTime() / 1000,
-          open: candle.open,
-          high: candle.high,
-          low: candle.low,
-          close: candle.close,
+          open: data.open,
+          high: data.high,
+          low: data.low,
+          close: data.close,
         };
-      });
 
-      const volumes = allData.map((candle) => {
-        const date = new Date(
-          (candle.timestamp + getBrowserTimezoneOffset() * 60 * 60) * 1000
-        );
-        return {
+        const volume = {
           time: date.getTime() / 1000,
-          value: candle.quote_volume,
+          value: data.quote_volume,
           color: candle.close < candle.open ? "red" : "#26a69a", // Red if bearish, green if bullish
         };
-      });
 
-      return {
-        candles: candles.reverse(),
-        volumes: volumes.reverse(),
-      };
-    }
+        return {
+          latestCandle: candle,
+          latestVolume: volume,
+        };
+      }
 
-    async function fetchInitialData() {
-      const exchange = fixedExchange;
-      const market = fixedMarket;
-      const interval = fixedInterval;
-      const from = fixedFrom;
-      const to = fixedTo;
-      return await fetchCandles(exchange, market, interval, from, to);
-    }
+      async function fetchOrders() {
+        const exchange = fixedExchange;
+        const ticker = fixedMarket;
+        const inq_st_dt = new Date(
+          fixedFrom.getTime() + timezoneOffset * 60 * 60 * 1000
+        )
+          .toISOString()
+          .split(".")[0]
+          .replace("T", " ");
+        const inq_close_dt = new Date(
+          fixedTo.getTime() + timezoneOffset * 60 * 60 * 1000
+        )
+          .toISOString()
+          .split(".")[0]
+          .replace("T", " ");
 
-    async function fetchLatestCandle() {
-      const exchange = fixedExchange;
-      const market = fixedMarket;
-      const interval = fixedInterval;
-      const limit = 1;
-      const params = new URLSearchParams({
-        exchange: exchange,
-        symbol: market,
-        interval: interval,
-        limit: limit,
-      });
+        // Validate datetime format
+        const datetimeRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
-      let retries = 0;
-      let success = false;
-      let data;
-
-      while (retries < maxRetries && !success) {
-        try {
-          let response = await fetch(
-            `${backendUrl}/kline?${params.toString()}`
+        if (inq_st_dt && !datetimeRegex.test(inq_st_dt)) {
+          alert(
+            "Invalid start datetime format. Expected format: YYYY-MM-DD HH:MM"
           );
-
-          if (response.status === 429) {
-            console.warn("429 Too Many Requests, retrying...");
-            retries++;
-            await sleep(retryDelay);
-          } else {
-            data = await response.json();
-            data = data[0];
-            success = true;
-          }
-        } catch (error) {
-          console.error("Error fetching data:", error);
-          retries++;
-          await sleep(retryDelay);
+          return;
         }
-      }
+        if (inq_close_dt && !datetimeRegex.test(inq_close_dt)) {
+          alert(
+            "Invalid end datetime format. Expected format: YYYY-MM-DD HH:MM"
+          );
+          return;
+        }
 
-      if (!success) {
-        throw new Error("Failed to fetch data after multiple retries");
-      }
-
-      const date = new Date(
-        (data.timestamp + getBrowserTimezoneOffset() * 60 * 60) * 1000
-      );
-      // console.log(`latest candle date:
-      //               -time : ${date.getTime() / 1000}
-      //               -open : ${data.open}
-      //               -high : ${data.high}
-      //               -low : ${data.low}
-      //               -close : ${data.close}`);
-
-      const candle = {
-        time: date.getTime() / 1000,
-        open: data.open,
-        high: data.high,
-        low: data.low,
-        close: data.close,
-      };
-
-      const volume = {
-        time: date.getTime() / 1000,
-        value: data.quote_volume,
-        color: candle.close < candle.open ? "red" : "#26a69a", // Red if bearish, green if bullish
-      };
-
-      return {
-        latestCandle: candle,
-        latestVolume: volume,
-      };
-    }
-
-    async function fetchOrders() {
-      const exchange = fixedExchange;
-      const ticker = fixedMarket;
-      const inq_st_dt = new Date(
-        fixedFrom.getTime() + timezoneOffset * 60 * 60 * 1000
-      )
-        .toISOString()
-        .split(".")[0]
-        .replace("T", " ");
-      const inq_close_dt = new Date(
-        fixedTo.getTime() + timezoneOffset * 60 * 60 * 1000
-      )
-        .toISOString()
-        .split(".")[0]
-        .replace("T", " ");
-
-      // Validate datetime format
-      const datetimeRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
-
-      if (inq_st_dt && !datetimeRegex.test(inq_st_dt)) {
-        alert(
-          "Invalid start datetime format. Expected format: YYYY-MM-DD HH:MM"
-        );
-        return;
-      }
-      if (inq_close_dt && !datetimeRegex.test(inq_close_dt)) {
-        alert("Invalid end datetime format. Expected format: YYYY-MM-DD HH:MM");
-        return;
-      }
-
-      const params = new URLSearchParams({
-        exchange,
-        ticker,
-        inq_st_dt,
-        inq_close_dt,
-      });
-
-      const response = await fetch(`${backendUrl}/orders?${params.toString()}`);
-      const orders = await response.json();
-      // console.log("orders: ", orders);
-      return orders.map((order) => ({
-        time: Math.floor(
-          (new Date(order.timestamp).getTime() +
-            getBrowserTimezoneOffset() * 60 * 60 * 1000) /
-            1000
-        ),
-        position: order.position == "long" ? "belowBar" : "aboveBar",
-        color: order.position == "long" ? "green" : "red",
-        shape: order.position == "long" ? "arrowUp" : "arrowDown",
-      }));
-    }
-
-    async function fetchPosition() {
-      const exchange = fixedExchange;
-      const ticker = fixedMarket;
-
-      const params = new URLSearchParams({
-        exchange,
-        ticker,
-      });
-
-      const response = await fetch(
-        `${backendUrl}/position?${params.toString()}`
-      );
-      const position = await response.json();
-      // console.log("position: ", position);
-      return position;
-    }
-
-    async function initializeChartWithInitialData() {
-      if (updateInterval) {
-        clearInterval(updateInterval);
-      }
-
-      // Clear existing data and lines
-      if (candleSeries != undefined) chart.removeSeries(candleSeries);
-      if (volumeSeries != undefined) chart.removeSeries(volumeSeries);
-
-      const start_time = Date.now();
-      const { candles, volumes } = await fetchInitialData();
-      console.log(
-        "elapsed time: ",
-        (Date.now() - start_time) / 1000,
-        "seconds"
-      );
-
-      candleSeries = chart.addCandlestickSeries();
-      // Set candle data
-      candleSeries.setData(candles);
-
-      volumeSeries = chart.addHistogramSeries(
-        {
-          color: "#26a69a",
-          priceFormat: {
-            type: "volume",
-          },
-          priceScaleId: "",
-        },
-        1
-      );
-
-      volumeSeries.priceScale().applyOptions({
-        autoScale: false, // disables auto scaling based on visible content
-        scaleMargins: {
-          top: 0.7,
-          bottom: 0,
-        },
-      });
-
-      // Set volume data
-      volumeSeries.setData(volumes);
-
-      // Fetch and set markers
-      const markers = await fetchOrders();
-      console.log("markers :", markers);
-      candleSeries.setMarkers(markers);
-
-      // Fetch and set position lines
-      const positions = await fetchPosition();
-      positions.forEach((pos) => {
-        candleSeries.createPriceLine({
-          price: pos.avg_buy_price,
-          color: "blue",
-          lineWidth: 2,
-          lineStyle: LightweightCharts.LineStyle.Solid,
-          axisLabelVisible: true,
-          title: `Size: ${pos.size}`,
+        const params = new URLSearchParams({
+          exchange,
+          ticker,
+          inq_st_dt,
+          inq_close_dt,
         });
-      });
 
-      // 실시간 업데이트를 위한 setInterval 설정
-      updateInterval = setInterval(async () => {
-        const { latestCandle, latestVolume } = await fetchLatestCandle();
-        const lastCandle = candles[candles.length - 1];
-        const lastVolume = volumes[volumes.length - 1];
+        const response = await fetch(
+          `${backendUrl}/orders?${params.toString()}`
+        );
+        const orders = await response.json();
+        // console.log("orders: ", orders);
 
-        if (latestCandle.time > lastCandle.time) {
-          // 새로운 봉이 생성된 경우
-          candles.push(latestCandle);
-          volumes.push(latestVolume);
-        } else {
-          // 현재 봉이 업데이트된 경우
-          candles[candles.length - 1] = latestCandle;
-          volumes[volumes.length - 1] = latestVolume;
+        // Display orders in the orders-container
+        const ordersTableBody = document.querySelector("#orders-table tbody");
+        ordersTableBody.innerHTML = ""; // Clear previous orders
+        orders
+          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)) // Sort by timestamp descending
+          .forEach((order) => {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+              <td>${order.timestamp}</td>
+              <td>${order.quoteVolume}</td>
+              <td>${order.position}</td>
+              <td>${order.orderId}</td>
+            `;
+            ordersTableBody.appendChild(row);
+          });
+
+        return orders.map((order) => ({
+          time: Math.floor(
+            (new Date(order.timestamp).getTime() +
+              getBrowserTimezoneOffset() * 60 * 60 * 1000) /
+              1000
+          ),
+          position: order.position == "long" ? "belowBar" : "aboveBar",
+          color: order.position == "long" ? "green" : "red",
+          shape: order.position == "long" ? "arrowUp" : "arrowDown",
+        }));
+      }
+
+      async function fetchPosition() {
+        const exchange = fixedExchange;
+        const ticker = fixedMarket;
+
+        const params = new URLSearchParams({
+          exchange,
+          ticker,
+        });
+
+        const response = await fetch(
+          `${backendUrl}/position?${params.toString()}`
+        );
+        const position = await response.json();
+        // console.log("position: ", position);
+        return position;
+      }
+
+      async function initializeChartWithInitialData() {
+        if (updateInterval) {
+          clearInterval(updateInterval);
         }
 
+        // Clear existing data and lines
+        if (candleSeries != undefined) chart.removeSeries(candleSeries);
+        if (volumeSeries != undefined) chart.removeSeries(volumeSeries);
+
+        const start_time = Date.now();
+        const { candles, volumes } = await fetchInitialData();
+        console.log(
+          "elapsed time: ",
+          (Date.now() - start_time) / 1000,
+          "seconds"
+        );
+
+        candleSeries = chart.addCandlestickSeries();
+        // Set candle data
         candleSeries.setData(candles);
+
+        volumeSeries = chart.addHistogramSeries(
+          {
+            color: "#26a69a",
+            priceFormat: {
+              type: "volume",
+            },
+            priceScaleId: "",
+          },
+          1
+        );
+
+        volumeSeries.priceScale().applyOptions({
+          autoScale: false, // disables auto scaling based on visible content
+          scaleMargins: {
+            top: 0.7,
+            bottom: 0,
+          },
+        });
+
+        // Set volume data
         volumeSeries.setData(volumes);
-      }, 1000); // 1초마다 업데이트
-    }
 
-    function submitForm() {
-      fixedExchange = document.getElementById("exchange").value;
-      fixedMarket = document.getElementById("ticker").value;
-      fixedInterval = document.getElementById("interval").value;
-      fixedFrom = new Date(document.getElementById("inq_st_dt").value);
-      fixedTo = new Date(document.getElementById("inq_close_dt").value);
+        // Fetch and set markers
+        const markers = await fetchOrders();
+        console.log("markers :", markers);
+        candleSeries.setMarkers(markers);
 
-      if (!exchange) {
-        alert("Exchange is required.");
-        return;
+        // Fetch and set position lines
+        const positions = await fetchPosition();
+        positions.forEach((pos) => {
+          candleSeries.createPriceLine({
+            price: pos.avg_buy_price,
+            color: "blue",
+            lineWidth: 2,
+            lineStyle: LightweightCharts.LineStyle.Solid,
+            axisLabelVisible: true,
+            title: `Size: ${pos.size}`,
+          });
+        });
+
+        // 실시간 업데이트를 위한 setInterval 설정
+        updateInterval = setInterval(async () => {
+          const { latestCandle, latestVolume } = await fetchLatestCandle();
+          const lastCandle = candles[candles.length - 1];
+          const lastVolume = volumes[volumes.length - 1];
+
+          if (latestCandle.time > lastCandle.time) {
+            // 새로운 봉이 생성된 경우
+            candles.push(latestCandle);
+            volumes.push(latestVolume);
+          } else {
+            // 현재 봉이 업데이트된 경우
+            candles[candles.length - 1] = latestCandle;
+            volumes[volumes.length - 1] = latestVolume;
+          }
+
+          candleSeries.setData(candles);
+          volumeSeries.setData(volumes);
+        }, 1000); // 1초마다 업데이트
       }
 
-      if (!ticker) {
-        alert("Ticker is required.");
-        return;
+      function submitForm() {
+        fixedExchange = document.getElementById("exchange").value;
+        fixedMarket = document.getElementById("ticker").value;
+        fixedInterval = document.getElementById("interval").value;
+        fixedFrom = new Date(document.getElementById("inq_st_dt").value);
+        fixedTo = new Date(document.getElementById("inq_close_dt").value);
+
+        if (!exchange) {
+          alert("Exchange is required.");
+          return;
+        }
+
+        if (!ticker) {
+          alert("Ticker is required.");
+          return;
+        }
+
+        initializeChartWithInitialData();
       }
 
-      initializeChartWithInitialData();
-    }
-
-    // 반응형 처리
-    window.addEventListener("resize", () => {
-      chart.resize(chartContainer.clientWidth, chartContainer.clientHeight);
-    });
-  </script>
+      // 반응형 처리
+      window.addEventListener("resize", () => {
+        chart.resize(chartContainer.clientWidth, chartContainer.clientHeight);
+      });
+    </script>
+  </body>
 </html>

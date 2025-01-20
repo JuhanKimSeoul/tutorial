@@ -54,7 +54,8 @@ def create_table():
             quoteVolume REAL NOT NULL,
             orderId TEXT NOT NULL,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            position TEXT NOT NULL
+            position TEXT NOT NULL,
+            size REAL DEFAULT 0,
         )
         """)
         conn.commit()
@@ -82,14 +83,15 @@ def migrate_table():
             quoteVolume REAL NOT NULL,
             orderId TEXT NOT NULL,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            position TEXT NOT NULL
+            position TEXT NOT NULL,
+            size REAL DEFAULT 0,
         )
         """)
         
         # Restore data with current timestamp, default position as 'long', and avgPrice as 0
         cursor.execute("""
-        INSERT INTO 'order' (exchange, ticker, quoteVolume, orderId, timestamp, position)
-        SELECT exchange, ticker, quoteVolume, orderId, timestamp, 'undefined'
+        INSERT INTO 'order' (exchange, ticker, quoteVolume, orderId, timestamp, position, size)
+        SELECT exchange, ticker, quoteVolume, orderId, timestamp, position, 5100
         FROM order_backup
         """)
         
@@ -115,10 +117,11 @@ def insert(**kwargs):
         orderId = kwargs.get('orderId')
         quoteVolume = kwargs.get('quoteVolume')
         position = kwargs.get('position')
+        size = kwargs.get('size')
 
         # 데이터 삽입
         try:
-            cursor.execute("INSERT INTO 'order' (exchange, ticker, quoteVolume, orderId, timestamp, position) VALUES (?, ?, ?, ?, datetime('now', '+9 hours'), ?)", (exchange, ticker, quoteVolume, orderId, position))
+            cursor.execute("INSERT INTO 'order' (exchange, ticker, quoteVolume, orderId, timestamp, position, size) VALUES (?, ?, ?, ?, datetime('now', '+9 hours'), ?, ?)", (exchange, ticker, quoteVolume, orderId, position, size))
         except sqlite3.IntegrityError as e:
             logger.info(f"Data insertion error: {e}")
         
@@ -253,8 +256,9 @@ async def order_handler(data):
         insert(exchange=data.get('exchange'), \
                ticker=data.get('ticker'), \
                quoteVolume=data.get('quote_volume'), \
-               orderId=res, \
-               position='long' if data.get('exchange') in ['upbit'] else 'long' if data.get('candle_type') == '-' else 'short')
+               orderId=res.order_id, \
+               position=res.side, \
+               size=res.qty)
         return True
 
     return False
