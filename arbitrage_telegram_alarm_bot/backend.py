@@ -58,6 +58,7 @@ class Order(BaseModel):
     orderId: str
     timestamp: str
     position: str
+    size: float
 
 cache = TTLCache(maxsize=100, ttl=1)
 
