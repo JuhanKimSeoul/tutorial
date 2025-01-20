@@ -148,6 +148,7 @@ async def get_orders(
             orderId=row[4],
             timestamp=row[5],
             position=row[6],
+            size=row[7]
         ))
     return orders
 
