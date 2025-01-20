@@ -55,7 +55,7 @@ def create_table():
             orderId TEXT NOT NULL,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             position TEXT NOT NULL,
-            size REAL DEFAULT 0,
+            size REAL DEFAULT 0
         )
         """)
         conn.commit()
