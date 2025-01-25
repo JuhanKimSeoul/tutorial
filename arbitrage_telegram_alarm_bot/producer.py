@@ -137,120 +137,126 @@ def insert(**kwargs):
         if conn:
             conn.close()
 
-async def upbit_order_handler(data):
-    # 업비트는 선물이 없으므로, 양봉일 때에만 진입
-    if data.get('candle_type') == '-':
-        return
-    
-    # 10억 이하 거래량은 제외
-    if data.get('quote_volume') < 1_000_000_000:
-        return
+class OrderHandler:
+    def __init__(self, exchange):
+        self.ex_name = exchange[0].upper() + exchange[1:]
+        self.exchange = globals()[self.ex_name + 'Manager']()
 
-    t = TradingDataManager(data.get('exchange'))
+    async def handle_order(self, data):
+        self.exchange.order(data)
 
-    balance, minOrderQty, price = await asyncio.gather(
-        t.get_all_position(),
-        t.get_min_order_qty(data.get('ticker')),
-        t.get_single_ticker_price(data.get('ticker'))
-    )
-    
-    bef_size = None
-    bef_avg_price = None
-    for pos in balance:
-        if pos.get('symbol') == data.get('ticker'):
-            bef_size = pos.get('size')
-            bef_avg_price = pos.get('avg_buy_price')
-            break
-    
-    logger.info(f"ticker: {data.get('ticker')}, \
-                  bef_size: {bef_size}, \
-                  bef_avg_price: {bef_avg_price}, \
-                  MinOrderQty: {minOrderQty}, \
-                  Price: {price}")
-    
-    # 테스트용 최소주문금액
-    minorder_amt = 5100
-    
-    order = PositionEntryIn(
-        symbol=data.get('ticker'),
-        side='long',
-        order_type='market',
-        qty=minorder_amt,
-    )
+class UpbitOrderHandler(OrderHandler):
+    async def order(self, data):
+        # 업비트는 선물이 없으므로, 양봉일 때에만 진입
+        if data.get('candle_type') == '-':
+            return
+        
+        # 10억 이하 거래량은 제외
+        if data.get('quote_volume') < 1_000_000_000:
+            return
 
-    return await TradingBroker('upbit').send_order(order)
+        t = TradingDataManager(data.get('exchange'))
 
-async def bybit_order_handler(data):
-    t = TradingDataManager(data.get('exchange'))
-
-    balance, minOrderQty, price, _ = await asyncio.gather(
-        t.get_balance(),
-        t.get_min_order_qty(data.get('ticker')),
-        t.get_single_ticker_price(data.get('ticker')),
-        t.set_leverage(data.get('ticker'), '5')
-    )
-
-    pyramiding = False
-    avg_price = 0
-    size = 0
-    # 피라미딩은 가능하나, 다른 방향으로 포지션 진입 불가
-    positions = await t.get_all_position()
-    for position in positions:
-        if position.get('symbol') == data.get('ticker') + 'USDT':
-            if position.get('side') == 'Buy' and data.get('candle_type') == '+':
-                size = position.get('size')
-                avg_price = position.get('avgPrice')
-                pyramiding = True
-                return False
-            elif position.get('side') == 'Sell' and data.get('candle_type') == '-':
-                pyramiding = True
-                size = position.get('size')
-                avg_price = position.get('avgPrice')
-                return False
-            
-    if float(balance) > float(minOrderQty) * float(price) * 2:
-        # 최소주문금액이 5USDT가 안되면, 5USDT로 맞춤
-        if float(minOrderQty) * float(price) < 5:
-            minOrderQty = 5 / float(price)
-
-        # 현재봉이 양봉이면, short진입이므로 TP가 -, SL가 +
-        # 피라미딩이면, 기존 포지션의 size와 avg_price를 가져와서 tp, sl을 조정
-        if data.get('candle_type') == '+':
-            if pyramiding:
-                tp = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 - 0.02 / 5)
-                sl = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 + 0.1 / 5)
-            else:
-                tp = float(price) * (1 - 0.05 / 5)
-                sl = float(price) * (1 + 0.1 / 5)
-        else:
-            if pyramiding:
-                tp = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 + 0.02 / 5)
-                sl = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 - 0.1 / 5)
-            else:
-                tp = float(price) * (1 + 0.05 / 5)
-                sl = float(price) * (1 - 0.1 / 5)
-
-        logger.debug(f"ticker: {data.get('ticker')}, Balance: {balance}, MinOrderQty: {minOrderQty}, Price: {price}")
-
+        balance, minOrderQty, price = await asyncio.gather(
+            t.get_all_position(),
+            t.get_min_order_qty(data.get('ticker')),
+            t.get_single_ticker_price(data.get('ticker'))
+        )
+        
+        bef_size = None
+        bef_avg_price = None
+        for pos in balance:
+            if pos.get('symbol') == data.get('ticker'):
+                bef_size = pos.get('size')
+                bef_avg_price = pos.get('avg_buy_price')
+                break
+        
+        logger.info(f"ticker: {data.get('ticker')}, \
+                    bef_size: {bef_size}, \
+                    bef_avg_price: {bef_avg_price}, \
+                    MinOrderQty: {minOrderQty}, \
+                    Price: {price}")
+        
+        # 테스트용 최소주문금액
+        minorder_amt = 5100
+        
         order = PositionEntryIn(
             symbol=data.get('ticker'),
-            side='bid' if data.get('candle_type') == '-' else 'ask',
+            side='long',
             order_type='market',
-            qty=int(minOrderQty*10),
-            tp=tp,
-            sl=sl
+            qty=minorder_amt,
         )
 
-        logger.debug(f"Order: {json.dumps(order.to_dict(), indent=4)}")
+        return await TradingBroker('upbit').send_order(order)
 
-    return await TradingBroker('bybit').send_order(order)
+class BybitOrderHandler(OrderHandler):
+    async def order(self, data):
+        t = TradingDataManager(data.get('exchange'))
+
+        balance, minOrderQty, price, _ = await asyncio.gather(
+            t.get_balance(),
+            t.get_min_order_qty(data.get('ticker')),
+            t.get_single_ticker_price(data.get('ticker')),
+            t.set_leverage(data.get('ticker'), '5')
+        )
+
+        pyramiding = False
+        avg_price = 0
+        size = 0
+        # 피라미딩은 가능하나, 다른 방향으로 포지션 진입 불가
+        positions = await t.get_all_position()
+        for position in positions:
+            if position.get('symbol') == data.get('ticker') + 'USDT':
+                if position.get('side') == 'Buy' and data.get('candle_type') == '+':
+                    size = position.get('size')
+                    avg_price = position.get('avgPrice')
+                    pyramiding = True
+                    return False
+                elif position.get('side') == 'Sell' and data.get('candle_type') == '-':
+                    pyramiding = True
+                    size = position.get('size')
+                    avg_price = position.get('avgPrice')
+                    return False
+                
+        if float(balance) > float(minOrderQty) * float(price) * 2:
+            # 최소주문금액이 5USDT가 안되면, 5USDT로 맞춤
+            if float(minOrderQty) * float(price) < 5:
+                minOrderQty = 5 / float(price)
+
+            # 현재봉이 양봉이면, short진입이므로 TP가 -, SL가 +
+            # 피라미딩이면, 기존 포지션의 size와 avg_price를 가져와서 tp, sl을 조정
+            if data.get('candle_type') == '+':
+                if pyramiding:
+                    tp = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 - 0.02 / 5)
+                    sl = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 + 0.1 / 5)
+                else:
+                    tp = float(price) * (1 - 0.05 / 5)
+                    sl = float(price) * (1 + 0.1 / 5)
+            else:
+                if pyramiding:
+                    tp = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 + 0.02 / 5)
+                    sl = (size * avg_price + minOrderQty * price) / (size + int(minOrderQty*10)) * (1 - 0.1 / 5)
+                else:
+                    tp = float(price) * (1 + 0.05 / 5)
+                    sl = float(price) * (1 - 0.1 / 5)
+
+            logger.debug(f"ticker: {data.get('ticker')}, Balance: {balance}, MinOrderQty: {minOrderQty}, Price: {price}")
+
+            order = PositionEntryIn(
+                symbol=data.get('ticker'),
+                side='bid' if data.get('candle_type') == '-' else 'ask',
+                order_type='market',
+                qty=int(minOrderQty*10),
+                tp=tp,
+                sl=sl
+            )
+
+            logger.debug(f"Order: {json.dumps(order.to_dict(), indent=4)}")
+
+        return await TradingBroker('bybit').send_order(order)
 
 async def order_handler(data):
-    if data.get('exchange') == 'bybit':
-        res = await bybit_order_handler(data)
-
-    if data.get('exchange') == 'upbit':
-        res = await upbit_order_handler(data)
+    res = await OrderHandler(data.get('exchange')).handle_order(data)
     
     if res:
         insert(exchange=data.get('exchange'), \
