@@ -140,10 +140,10 @@ def insert(**kwargs):
 class OrderHandler:
     def __init__(self, exchange):
         self.ex_name = exchange[0].upper() + exchange[1:]
-        self.exchange = globals()[self.ex_name + 'Manager']()
+        self.exchange = globals()[self.ex_name + 'OrderHandler']()
 
     async def handle_order(self, data):
-        self.exchange.order(data)
+        await self.exchange.order(data)
 
 class UpbitOrderHandler(OrderHandler):
     async def order(self, data):
@@ -256,7 +256,7 @@ class BybitOrderHandler(OrderHandler):
         return await TradingBroker('bybit').send_order(order)
 
 async def order_handler(data):
-    res = await OrderHandler(data.get('exchange')).order(data)
+    res = await OrderHandler(data.get('exchange')).handle_order(data)
     
     if res:
         insert(exchange=data.get('exchange'), \
