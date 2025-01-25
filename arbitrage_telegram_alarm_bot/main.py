@@ -3327,7 +3327,7 @@ class TradingBroker:
             res = await self.ex.post_order(PositionEntryIn)
             if res.get('uuid'):
                 return PositionEntryOut(order_id=res.get('uuid'), 
-                                        side=PositionEntryIn.side, 
+                                        side='long', 
                                         symbol=PositionEntryIn.symbol, 
                                         order_type=PositionEntryIn.order_type, 
                                         qty=PositionEntryIn.qty)

@@ -185,7 +185,7 @@ class UpbitOrderHandler(OrderHandler):
         
         order = PositionEntryIn(
             symbol=data.get('ticker'),
-            side='long',
+            side='bid',
             order_type='market',
             qty=minorder_amt,
         )
