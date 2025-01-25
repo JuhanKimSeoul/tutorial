@@ -210,6 +210,10 @@
             }
           }
 
+          if (data.length === 0) {
+            break;
+          }
+
           if (!success) {
             throw new Error("Failed to fetch data after multiple retries");
           }

@@ -173,7 +173,7 @@ async def upbit_order_handler(data):
     
     order = PositionEntryIn(
         symbol=data.get('ticker'),
-        side='bid',
+        side='long',
         order_type='market',
         qty=minorder_amt,
     )

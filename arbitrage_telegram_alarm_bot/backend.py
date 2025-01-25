@@ -156,7 +156,7 @@ async def get_orders(
 @app.get("/kline")
 @limiter.limit("10/second")
 async def get_kline(request: Request, exchange: str, symbol: str, interval: str, to: Optional[str] = None, limit: Optional[int] = None):
-    logger.info(f"Querying Kline\n"
+    logger.debug(f"Querying Kline\n"
                 f"exchange={exchange},\n"
                 f"symbol={symbol},\n"
                 f"interval={interval},\n"
