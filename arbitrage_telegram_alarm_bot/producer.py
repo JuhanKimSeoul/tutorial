@@ -139,13 +139,16 @@ def insert(**kwargs):
 
 class OrderHandler:
     def __init__(self, exchange):
-        self.ex_name = exchange[0].upper() + exchange[1:]
-        self.exchange = globals()[self.ex_name + 'OrderHandler']()
+        self.ex_class_name = exchange[0].upper() + exchange[1:]
+        self.exchange = globals()[self.ex_class_name + 'OrderHandler'](exchange)
 
     async def handle_order(self, data):
         await self.exchange.order(data)
 
 class UpbitOrderHandler(OrderHandler):
+    def __init__(self, exchange):
+        self.ex_name = exchange
+
     async def order(self, data):
         # 업비트는 선물이 없으므로, 양봉일 때에만 진입
         if data.get('candle_type') == '-':
@@ -190,6 +193,9 @@ class UpbitOrderHandler(OrderHandler):
         return await TradingBroker('upbit').send_order(order)
 
 class BybitOrderHandler(OrderHandler):
+    def __init__(self, exchange):
+        self.ex_name = exchange
+
     async def order(self, data):
         t = TradingDataManager(data.get('exchange'))
 
