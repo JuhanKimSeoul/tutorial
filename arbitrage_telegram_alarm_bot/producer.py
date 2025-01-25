@@ -256,7 +256,7 @@ class BybitOrderHandler(OrderHandler):
         return await TradingBroker('bybit').send_order(order)
 
 async def order_handler(data):
-    res = await OrderHandler(data.get('exchange')).handle_order(data)
+    res = await OrderHandler(data.get('exchange')).order(data)
     
     if res:
         insert(exchange=data.get('exchange'), \
