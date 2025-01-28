@@ -143,13 +143,13 @@ class OrderHandler:
         self.exchange = globals()[self.ex_class_name + 'OrderHandler'](exchange)
 
     async def handle_order(self, data):
-        await self.exchange.order(data)
+       return await self.exchange.send_order(data)
 
 class UpbitOrderHandler(OrderHandler):
     def __init__(self, exchange):
         self.ex_name = exchange
 
-    async def order(self, data):
+    async def send_order(self, data):
         # 업비트는 선물이 없으므로, 양봉일 때에만 진입
         if data.get('candle_type') == '-':
             return
@@ -174,12 +174,6 @@ class UpbitOrderHandler(OrderHandler):
                 bef_avg_price = pos.get('avg_buy_price')
                 break
         
-        logger.info(f"ticker: {data.get('ticker')}, \
-                    bef_size: {bef_size}, \
-                    bef_avg_price: {bef_avg_price}, \
-                    MinOrderQty: {minOrderQty}, \
-                    Price: {price}")
-        
         # 테스트용 최소주문금액
         minorder_amt = 5100
         
@@ -190,13 +184,13 @@ class UpbitOrderHandler(OrderHandler):
             qty=minorder_amt,
         )
 
-        return await TradingBroker('upbit').send_order(order)
+        return await TradingBroker(self.ex_name).send_order(order)
 
 class BybitOrderHandler(OrderHandler):
     def __init__(self, exchange):
         self.ex_name = exchange
 
-    async def order(self, data):
+    async def send_order(self, data):
         t = TradingDataManager(data.get('exchange'))
 
         balance, minOrderQty, price, _ = await asyncio.gather(
